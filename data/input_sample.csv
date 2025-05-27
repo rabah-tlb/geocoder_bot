@@ -1,0 +1,51 @@
+id,nom_etablissement,rue,code_postal,ville,gouvernorat,pays
+1,Café Le Dôme,12 Rue Ibn Khaldoun,1001,Tunis,Tunis,Tunisie
+2,Lycée Bourguiba,4 Avenue de Paris,1002,Tunis,Tunis,Tunisie
+3,Pharmacie El Amen,34 Rue de Marseille,1003,Tunis,Tunis,Tunisie
+4,Clinique Carthage,7 Rue des Jasmins,2078,La Marsa,Tunis,Tunisie
+5,Université Centrale,15 Rue des Entrepreneurs,1082,Menzah,Tunis,Tunisie
+6,Librairie Ibn Sina,9 Rue Mokhtar Attia,3000,Sfax,Sfax,Tunisie
+7,École El Farabi,21 Rue Habib Bourguiba,3001,Sfax,Sfax,Tunisie
+8,Hôtel El Mouradi,1 Avenue Habib Bourguiba,8000,Nabeul,Nabeul,Tunisie
+9,Restaurant Le Délice,6 Rue Ibn Khaldoun,8001,Hammamet,Nabeul,Tunisie
+10,Centre Médical Ennaser,18 Avenue Taieb Mhiri,2037,Ennaser,Ariana,Tunisie
+11,Boutique La Tunisie,2 Rue de la Liberté,2036,Soukra,Ariana,Tunisie
+12,Centre Sportif Olympique,25 Rue Olympique,4000,Sousse,Sousse,Tunisie
+13,Station Total Sahloul,7 Rue Farhat Hached,4003,Sahloul,Sousse,Tunisie
+14,Institut Ibn Rochd,33 Rue de la République,6000,Gabes,Gabes,Tunisie
+15,Pharmacie Centrale Sud,11 Avenue Omar Mokhtar,6001,Chenini,Gabes,Tunisie
+16,Boulangerie El Wafa,8 Rue de la Paix,7000,Bizerte,Bizerte,Tunisie
+17,Marché Central,23 Rue Moncef Bey,7001,Menzel Bourguiba,Bizerte,Tunisie
+18,Café Le Relax,4 Rue de l’Indépendance,5000,Kairouan,Kairouan,Tunisie
+19,Mosquée Okba,1 Place Okba Ibn Nafi,5001,Kairouan,Kairouan,Tunisie
+20,Restaurant Mida,3 Avenue de la République,5100,Monastir,Monastir,Tunisie
+21,Aéroport Monastir,Route de l’Aéroport,5101,Monastir,Monastir,Tunisie
+22,Hôpital Régional,10 Rue des Martyrs,6100,Gafsa,Gafsa,Tunisie
+23,Centre Culturel Ibn Khaldoun,12 Avenue Hédi Nouira,6101,Mdhilla,Gafsa,Tunisie
+24,Université de Gafsa,45 Rue de l’Université,6102,Redeyef,Gafsa,Tunisie
+25,Épicerie Al Baraka,14 Rue de la Liberté,4000,Sousse,Sousse,Tunisie
+26,Hôtel Mahdia Palace,2 Rue des Palmiers,5102,Mahdia,Mahdia,Tunisie
+27,Club Nautique,7 Avenue de la Plage,5103,Mahdia,Mahdia,Tunisie
+28,Institut Supérieur,30 Rue Ibn Sina,1004,Tunis,Tunis,Tunisie
+29,Banque Zitouna,20 Rue Ali Belhouane,3002,Sfax,Sfax,Tunisie
+30,École Primaire Ennour,16 Rue Mohamed Ali,7002,Bizerte,Bizerte,Tunisie
+31,Hôpital Habib Bourguiba,50 Avenue Maghreb Arabe,3003,Sfax,Sfax,Tunisie
+32,Café Le Rocher,5 Rue de la Corniche,8002,Hammamet,Nabeul,Tunisie
+33,Collège Ibn Khaldoun,13 Rue Jebal,1100,Zaghouan,Zaghouan,Tunisie
+34,Clinique Ibn Sina,6 Avenue Hédi Chaker,3004,Sfax,Sfax,Tunisie
+35,Stade Municipal,8 Rue des Sports,2000,Le Bardo,Tunis,Tunisie
+36,Mairie de Menzah,27 Avenue Menzah 5,1083,Menzah,Tunis,Tunisie
+37,Centre El Hana,18 Rue Ibn Jazzar,5002,Kairouan,Kairouan,Tunisie
+38,Restaurant Le Phare,10 Avenue du Port,7003,Menzel Temime,Nabeul,Tunisie
+39,Hôtel Le Sultan,3 Rue des Jasmins,8003,Hammamet,Nabeul,Tunisie
+40,Centre Urbain Nord,Zone Industrielle Kheireddine,2035,Ariana,Ariana,Tunisie
+41,Banque Centrale,1 Avenue Mohamed V,1000,Tunis,Tunis,Tunisie
+42,École Nationale d’Ingénieurs,ENIT BP 37 Le Belvédère,1002,Tunis,Tunis,Tunisie
+43,Centre de Formation Tek-Up,Immeuble El Ghazala,2083,Ariana,Ariana,Tunisie
+44,Salle de Sport Olympia,26 Rue Olympique,4004,Sousse,Sousse,Tunisie
+45,Marché de Sfax,11 Avenue Bourguiba,3005,Sfax,Sfax,Tunisie
+46,Université de Monastir,9 Rue Ibn El Jazzar,5104,Monastir,Monastir,Tunisie
+47,Bureau de Poste Central,1 Rue des PTT,6002,Gabes,Gabes,Tunisie
+48,Centre de Santé Bab Bhar,22 Avenue Habib Bourguiba,1005,Tunis,Tunis,Tunisie
+49,Centre Culturel Tahar Haddad,15 Rue du Tribunal,1006,Tunis,Tunis,Tunisie
+50,Hôtel Africa,50 Avenue Habib Bourguiba,1001,Tunis,Tunis,Tunisie
