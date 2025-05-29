@@ -1,21 +1,24 @@
 import pandas as pd
-import chardet
+import csv
 
-def detect_encoding(file_obj):
-    raw_data = file_obj.read(10000)
-    file_obj.seek(0)  # Revenir au début du fichier
-    result = chardet.detect(raw_data)
-    return result['encoding']
-
-def read_file(file_obj, sep: str = ",", encoding: str = None) -> pd.DataFrame:
+def detect_separator(file, max_lines=5):
+    sample = file.read(2048).decode('utf-8', errors='ignore')
+    file.seek(0)
+    sniffer = csv.Sniffer()
     try:
-        # Détection automatique de l'encodage si non fourni
-        if encoding is None:
-            encoding = detect_encoding(file_obj)
+        dialect = sniffer.sniff(sample)
+        return dialect.delimiter
+    except csv.Error:
+        return ","  # fallback
 
-        # Lire le fichier depuis Streamlit (BytesIO)
-        df = pd.read_csv(file_obj, sep=sep, encoding=encoding, engine="python")
-        return df
-    except Exception as e:
-        print(f"Erreur de lecture : {e}")
-        return pd.DataFrame()
+def read_file(uploaded_file, sep=None):
+    if sep is None:
+        sep = detect_separator(uploaded_file)
+    
+    try:
+        df = pd.read_csv(uploaded_file, sep=sep, encoding="utf-8")
+    except Exception:
+        uploaded_file.seek(0)
+        df = pd.read_csv(uploaded_file, sep=sep, encoding="ISO-8859-1")
+
+    return df
