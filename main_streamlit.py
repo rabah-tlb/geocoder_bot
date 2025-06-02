@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import math
 from src.ingestion import read_file
 from src.geocoding import geocode_dataframe, clean_address
 
@@ -11,27 +12,59 @@ st.title("📍 Robot de Géocodage")
 if "df" not in st.session_state:
     st.session_state.df = None
 
+if "last_selected_enriched_df" not in st.session_state:
+    st.session_state.last_selected_enriched_df = None
+
 if "enriched_df" not in st.session_state:
     st.session_state.enriched_df = None
 
 if "cleaned_df" not in st.session_state:
     st.session_state.cleaned_df = None
 
+if "batch_results" not in st.session_state:
+    st.session_state.batch_results = []
+
+if "modified_rows" not in st.session_state:
+    st.session_state.modified_rows = set()
+
 # ========== UPLOAD ET LECTURE ==========
 st.subheader("📁 Chargement du fichier")
 
 uploaded_file = st.file_uploader("Dépose un fichier CSV ou TXT", type=["csv", "txt"])
 
-if uploaded_file and st.session_state.df is None:
-    detect_auto = st.checkbox("🔍 Détecter automatiquement le séparateur", value=True)
+# Gestion de la réinitialisation lorsque le fichier est retiré
+if uploaded_file is None:
+    st.session_state.df = None
+    st.session_state.enriched_df = None
+    st.session_state.cleaned_df = None
+    st.session_state.batch_results = []
+    st.session_state.modified_rows = set()
+    st.session_state.mapping_config = {
+        "fields": {},
+        "mode": "Adresse complète",
+        "attribute_selected": None
+    }
 
-    if detect_auto:
-        df = read_file(uploaded_file, sep=None)
-    else:
-        separator = st.selectbox("Séparateur", [",", ";", "|", "\\t"], index=0)
-        if separator == "\\t":
-            separator = "\t"
-        df = read_file(uploaded_file, sep=separator)
+# Détection de changement de fichier pour reset automatique
+current_filename = uploaded_file.name if uploaded_file else None
+previous_filename = st.session_state.get("previous_filename", None)
+
+if uploaded_file and current_filename != previous_filename:
+    # Réinitialiser tous les états liés au précédent fichier
+    st.session_state.df = None
+    st.session_state.enriched_df = None
+    st.session_state.cleaned_df = None
+    st.session_state.batch_results = []
+    st.session_state.modified_rows = set()
+    st.session_state.mapping_config = {
+        "fields": {},
+        "mode": "Adresse complète",
+        "attribute_selected": None
+    }
+    st.session_state.previous_filename = current_filename  # Sauvegarder le nouveau nom
+
+if uploaded_file and st.session_state.df is None:
+    df = read_file(uploaded_file, sep=None)
 
     if not df.empty:
         st.session_state.df = df
@@ -49,126 +82,289 @@ if df is not None:
     st.subheader("🧩 Mapping des Colonnes")
 
     possible_fields = ['street', 'postal_code', 'city', 'country', 'governorate', 'name', 'complement']
-    mapping = {}
+
+    if "mapping_config" not in st.session_state:
+        st.session_state.mapping_config = {
+            "fields": {},
+            "mode": "Adresse complète",
+            "attribute_selected": None
+        }
+
+    mapping_config = st.session_state.mapping_config
+    current_mapping = {}
 
     for field in possible_fields:
-        mapping[field] = st.selectbox(
+        current_mapping[field] = st.selectbox(
             f"Colonne pour {field}",
             options=["-- Aucun --"] + list(df.columns),
-            index=0,
+            index=(["-- Aucun --"] + list(df.columns)).index(mapping_config["fields"].get(field, "-- Aucun --"))
+            if "fields" in mapping_config and field in mapping_config["fields"] else 0,
             key=f"mapping_{field}"
         )
 
-    mapped_fields = {k: v for k, v in mapping.items() if v != "-- Aucun --"}
+    mapped_fields = {k: v for k, v in current_mapping.items() if v != "-- Aucun --"}
+    st.session_state.mapping_config["fields"] = mapped_fields
+
+    mode = st.radio("🎯 Mode de géocodage", ["Adresse complète", "Nom + Attribut (flexible)"],
+                    index=0 if mapping_config.get("mode") == "Adresse complète" else 1,
+                    key="geocode_mode")
+
+    st.session_state.mapping_config["mode"] = mode
+
+    selected_attr = None
+    if mode == "Nom + Attribut (flexible)" and "name" in mapped_fields:
+        optional_fields = ['street', 'postal_code', 'city', 'country', 'governorate', 'complement']
+        attribute_options = [f for f in optional_fields if f in mapped_fields]
+
+        if attribute_options:
+            selected_attr = st.selectbox(
+                "🧩 Choisir un champ à concaténer avec 'name'",
+                options=attribute_options,
+                index=attribute_options.index(mapping_config.get("attribute_selected"))
+                if mapping_config.get("attribute_selected") in attribute_options else 0,
+                key="concat_attr"
+            )
+            st.session_state.mapping_config["attribute_selected"] = selected_attr
 
     if st.button("➡️ Générer la colonne 'full_address'"):
-        if all(k in mapped_fields for k in ["street", "postal_code", "city"]):
-            df["full_address"] = df[mapped_fields["street"]].astype(str) + ", " + \
-                                 df[mapped_fields["postal_code"]].astype(str) + " " + \
-                                 df[mapped_fields["city"]].astype(str)
-            st.session_state.df = df.copy()
-            st.success("✅ Colonne 'full_address' générée !")
-            st.dataframe(df[["full_address"]].head())
-        else:
-             st.warning("⚠️ Tu dois mapper au moins les champs 'street', 'postal_code' et 'city'.")
+        if mode == "Adresse complète":
+            required_keys = ["street", "postal_code"]
+            optional_keys = ["city", "country", "governorate", "complement"]
 
-# ========== GÉOCODAGE MULTI-API ==========
-st.subheader("📍 Géocodage Multi-API")
+            if all(k in mapped_fields for k in required_keys):
+                parts = [
+                    st.session_state.df[mapped_fields["street"]].astype(str),
+                    st.session_state.df[mapped_fields["postal_code"]].astype(str)
+                ]
+                for key in optional_keys:
+                    if key in mapped_fields:
+                        parts.append(st.session_state.df[mapped_fields[key]].astype(str))
 
-if st.button("🚀 Lancer le géocodage avec Google Maps"):
-    df = st.session_state.get("df", None)
+                st.session_state.df["full_address"] = parts[0]
+                for part in parts[1:]:
+                    st.session_state.df["full_address"] += ", " + part
 
-    if df is None:
-        st.error("❌ Aucun fichier disponible.")
-    elif "full_address" not in df.columns:
-        st.error("❌ La colonne 'full_address' est manquante.")
-    else:
-        with st.spinner("Géocodage en cours..."):
-            enriched_df = geocode_dataframe(df, address_column="full_address")
-            st.session_state.enriched_df = enriched_df
-            st.success("✅ Géocodage terminé")
-            st.dataframe(enriched_df)
+                st.success("✅ Colonne 'full_address' générée (adresse complète + champs optionnels) !")
+            else:
+                st.warning("⚠️ Tu dois mapper les champs : street, postal_code pour ce mode.")
+        elif selected_attr and "name" in mapped_fields:
+            st.session_state.df["full_address"] = (
+                st.session_state.df[mapped_fields["name"]].astype(str) + ", " +
+                st.session_state.df[mapped_fields[selected_attr]].astype(str)
+            )
+            st.success(f"✅ Colonne 'full_address' générée (nom + {selected_attr}) !")
 
+    if "full_address" in st.session_state.df.columns:
+        st.dataframe(st.session_state.df[["full_address"]].head())
+
+# ========== GÉOCODAGE PAR BATCH ==========
+if st.session_state.df is not None and "full_address" in st.session_state.df.columns:
+    st.subheader("📍 Géocodage Multi-API en Batches")
+
+    total_rows = len(st.session_state.df)
+    st.markdown(f"🔢 Nombre total de lignes : **{total_rows}**")
+
+    start_line = st.number_input("📍 Ligne de départ (incluse)", min_value=0, max_value=total_rows - 1, value=0)
+    end_line = st.number_input("🏁 Ligne de fin (exclue)", min_value=start_line + 1, max_value=total_rows, value=min(start_line + 100, total_rows))
+
+    batch_size = st.number_input("📦 Taille d’un batch", min_value=10, max_value=1000, value=100, step=10)
+
+    selected_df = st.session_state.df.iloc[start_line:end_line].copy()
+    total_selected = len(selected_df)
+    total_batches = math.ceil(total_selected / batch_size)
+
+    nb_batches_to_run = st.number_input("🚀 Nombre de batches à exécuter", min_value=1, max_value=total_batches, value=total_batches)
+
+    actual_batches = min(nb_batches_to_run, total_batches)
+    actual_rows = min(actual_batches * batch_size, total_selected)
+    st.info(f"🧮 {actual_rows} lignes sélectionnées – {actual_batches} batches de {batch_size}")
+
+    if st.button("🚀 Lancer le géocodage sur cette plage"):
+        batch_results = []
+
+        for i in range(nb_batches_to_run):
+            start = i * batch_size
+            end = min((i + 1) * batch_size, total_selected)
+            batch_df = selected_df.iloc[start:end].copy()
+
+            with st.spinner(f"🔄 Traitement du batch {i+1}/{nb_batches_to_run}..."):
+                enriched_batch = geocode_dataframe(batch_df, address_column="full_address")
+                batch_results.append(enriched_batch)
+                st.success(f"✅ Batch {i+1} traité !")
+
+        st.session_state.batch_results = batch_results
+
+        selected_enriched_df = pd.concat(batch_results, ignore_index=True)
+        st.session_state.last_selected_enriched_df = selected_enriched_df
+
+        # Mise à jour uniquement des lignes concernées dans le enriched_df global
+        if st.session_state.enriched_df is None:
+            st.session_state.enriched_df = st.session_state.df.copy()
+
+        for _, row in selected_enriched_df.iterrows():
+            row_index = row.get("row_index", None)
+            if row_index is not None:
+                for col in selected_enriched_df.columns:
+                    if col != "row_index":
+                        st.session_state.enriched_df.at[row_index, col] = row[col]
+
+        st.success("🎉 Tous les batches de la plage sélectionnée ont été traités !")
+
+# ========== AFFICHAGE DES TABS APRÈS TRAITEMENT ==========
+if st.session_state.batch_results:
+    enriched_df = st.session_state.last_selected_enriched_df
+    batch_results = st.session_state.batch_results
+
+    tabs = st.tabs(["📊 Total", "❌ Échecs"] + [f"Batch {i+1}" for i in range(len(batch_results))])
+
+    with tabs[0]:
+        st.markdown(f"### 📦 {len(batch_results)} batches traités")
+        st.markdown(f"- Taille de batch : `{batch_size}` lignes")
+        st.markdown(f"- Lignes traitées : `{len(enriched_df)}`")
+        total_success = (enriched_df["status"] == "OK").sum()
+        total_failed = len(enriched_df) - total_success
+        rate = round(total_success / len(enriched_df) * 100, 2)
+        st.markdown(f"- Succès : ✅ `{total_success}`")
+        st.markdown(f"- Échecs : ❌ `{total_failed}`")
+        st.markdown(f"- Taux de réussite global : **{rate}%**")
+        st.dataframe(enriched_df)
+
+    with tabs[1]:
+        failed_df = enriched_df[enriched_df["status"] != "OK"]
+        st.markdown(f"### ❌ Lignes échouées : {len(failed_df)}")
+        st.dataframe(failed_df)
+
+    for i, batch_df in enumerate(batch_results):
+        with tabs[i + 2]:
+            batch_success = (batch_df["status"] == "OK").sum()
+            batch_failed = len(batch_df) - batch_success
+            rate = round(batch_success / len(batch_df) * 100, 2)
+            st.markdown(f"### 📦 Batch {i+1} – `{len(batch_df)}` lignes")
+            st.markdown(f"- Succès : ✅ `{batch_success}`")
+            st.markdown(f"- Échecs : ❌ `{batch_failed}`")
+            st.markdown(f"- Taux de réussite : **{rate}%**")
+            st.dataframe(batch_df)
+
+# ========== RELANCE DES ÉCHECS ==========
 if st.session_state.enriched_df is not None:
-    enriched_df = st.session_state.enriched_df
-
-    total = len(enriched_df)
+    enriched_df = st.session_state.last_selected_enriched_df
     failed_df = enriched_df[enriched_df["status"] != "OK"]
-    failed_count = len(failed_df)
-    success_count = total - failed_count
-    rate = round(success_count / total * 100, 2)
 
-    st.subheader("📊 Statistiques de traitement")
-    st.markdown(f"- Total lignes traitées : `{total}`")
-    st.markdown(f"- Succès : ✅ `{success_count}`")
-    st.markdown(f"- Échecs : ❌ `{failed_count}`")
-    st.markdown(f"- Taux de réussite : **{rate}%**")
-
-    enriched_df = enriched_df.reset_index(drop=True)
-    st.session_state.enriched_df = enriched_df  # mettre à jour
-
-    # Bouton de nettoyage après géocodage
-    if st.button("🧹 Nettoyer les adresses géocodées"):
-        cleaned_df = enriched_df.copy()
-        cleaned_df["full_address"] = cleaned_df["full_address"].apply(clean_address)
-        st.session_state.cleaned_df = cleaned_df
-
-        # Affichage de la différence
-        st.success("✅ Nettoyage terminé ! Voici un aperçu avant/après :")
-        comparison_df = pd.DataFrame({
-            "Avant nettoyage": enriched_df["full_address"],
-            "Après nettoyage": cleaned_df["full_address"]
-        })
-        st.dataframe(comparison_df.head())
-
-    # Bloc de relance
-    if failed_count > 0:
-        st.warning(f"⚠️ {failed_count} lignes ont échoué.")
+    if not failed_df.empty:
+        st.warning(f"⚠️ {len(failed_df)} lignes ont échoué au géocodage.")
 
         if st.button("🔁 Relancer uniquement les erreurs"):
-            st.info("🔄 Relance des lignes échouées...")
+            with st.spinner("🔄 Relance des lignes échouées (avec reformulation des adresses)..."):
 
-            # Re-géocoder uniquement les lignes en échec
-            retried_df = geocode_dataframe(failed_df, address_column="full_address")
+                # Récupérer le mapping sauvegardé
+                mapped_fields = st.session_state.get("mapping_config", {}).get("fields", {})
 
-            # Reset index pour éviter tout conflit d’indexation
-            enriched_df = enriched_df.reset_index(drop=True)
+                def reformat_address(row):
+                    parts = []
+                    for field in ["street", "postal_code", "city", "governorate", "country", "complement"]:
+                        if field in mapped_fields and mapped_fields[field] in row:
+                            value = row[mapped_fields[field]]
+                            if pd.notna(value):
+                                parts.append(str(value))
+                    return ", ".join(parts)
 
-            # Mise à jour des lignes échouées par les nouvelles valeurs
-            for _, row in retried_df.iterrows():
-                try:
-                    row_index = int(row["row_index"])  # index d’origine
-                    for col in retried_df.columns:
-                        value = row[col]
+                # Reformuler les adresses
+                failed_df = failed_df.copy()
+                failed_df["full_address"] = failed_df.apply(reformat_address, axis=1)
 
-                        # Si c’est une Series, on prend le premier élément
-                        if isinstance(value, pd.Series):
-                            value = value.iloc[0]
+                # Nettoyage des anciennes colonnes de géocodage
+                geo_cols = [
+                    'latitude', 'longitude', 'formatted_address',
+                    'status', 'error_message', 'api_used',
+                    'precision_level', 'timestamp'
+                ]
+                for col in geo_cols:
+                    if col in failed_df.columns:
+                        failed_df.drop(columns=[col], inplace=True)
 
-                        enriched_df.at[row_index, col] = value
+                # Re-géocodage complet
+                retried_df = geocode_dataframe(failed_df, address_column="full_address")
 
-                except Exception as e:
-                    st.warning(f"⚠️ Erreur en mettant à jour la ligne {row_index}, colonne '{col}' : {e}")
+                # Affichage debug
+                st.markdown("### ✅ Résultat des lignes relancées")
+                st.dataframe(retried_df)
 
-            # Mise à jour de session
-            st.session_state.enriched_df = enriched_df
+                # Mise à jour du enriched_df
+                if "id" not in enriched_df.columns or "id" not in retried_df.columns:
+                    st.error("❌ Impossible de mettre à jour : colonne 'id' manquante.")
+                else:
+                    # Supprimer les lignes échouées avec les mêmes id
+                    failed_ids = retried_df["id"].unique()
+                    enriched_df_cleaned = enriched_df[~enriched_df["id"].isin(failed_ids)]
 
-            st.success("✅ Relance terminée ! Résultats mis à jour.")
-            st.dataframe(enriched_df)
+                    # Fusionner avec les lignes corrigées
+                    updated_df = pd.concat([enriched_df_cleaned, retried_df], ignore_index=True)
+
+                    # Trier si besoin
+                    updated_df = updated_df.sort_values(by="id").reset_index(drop=True)
+
+                    # Enregistrer la mise à jour
+                    st.session_state.enriched_df = updated_df
+                    st.session_state.last_selected_enriched_df = updated_df  # clé ici pour l'export
+
+                    st.success(f"✅ {len(retried_df)} lignes corrigées ! Résultats mis à jour.")
+
+# ========== RELANCE DES ADRESSES INVALIDES ==========
+if st.session_state.enriched_df is not None:
+    enriched_df = st.session_state.last_selected_enriched_df
+    invalid_df = enriched_df[(enriched_df["status"] == "OK") & (enriched_df["valid_address"] == False)]
+
+    if not invalid_df.empty:
+        st.warning(f"⚠️ {len(invalid_df)} lignes sont valides techniquement mais hors Tunisie.")
+
+        if st.button("🔁 Relancer les adresses invalides (hors Tunisie)"):
+            with st.spinner("🔄 Relance des lignes invalides (avec reformulation des adresses)..."):
+
+                mapped_fields = st.session_state.get("mapping_config", {}).get("fields", {})
+
+                def reformat_address(row):
+                    parts = []
+                    for field in ["street", "postal_code", "city", "governorate", "country", "complement"]:
+                        if field in mapped_fields and mapped_fields[field] in row:
+                            value = row[mapped_fields[field]]
+                            if pd.notna(value):
+                                parts.append(str(value))
+                    return ", ".join(parts)
+
+                invalid_df = invalid_df.copy()
+                invalid_df["full_address"] = invalid_df.apply(reformat_address, axis=1)
+
+                geo_cols = [
+                    'latitude', 'longitude', 'formatted_address',
+                    'status', 'error_message', 'api_used',
+                    'precision_level', 'timestamp', 'valid_address'
+                ]
+                for col in geo_cols:
+                    if col in invalid_df.columns:
+                        invalid_df.drop(columns=[col], inplace=True)
+
+                retried_invalid_df = geocode_dataframe(invalid_df, address_column="full_address")
+
+                st.markdown("### ✅ Résultat des adresses relancées")
+                st.dataframe(retried_invalid_df)
+
+                if "id" not in enriched_df.columns or "id" not in retried_invalid_df.columns:
+                    st.error("❌ Impossible de mettre à jour : colonne 'id' manquante.")
+                else:
+                    invalid_ids = retried_invalid_df["id"].unique()
+                    enriched_df_cleaned = enriched_df[~enriched_df["id"].isin(invalid_ids)]
+
+                    updated_df = pd.concat([enriched_df_cleaned, retried_invalid_df], ignore_index=True)
+                    updated_df = updated_df.sort_values(by="id").reset_index(drop=True)
+
+                    st.session_state.enriched_df = updated_df
+                    st.session_state.last_selected_enriched_df = updated_df
+
+                    st.success(f"✅ {len(retried_invalid_df)} lignes relancées et mises à jour.")
 
 # ========== EXPORT ==========
-if st.session_state.enriched_df is not None:
+if st.session_state.last_selected_enriched_df is not None:
     if st.button("📅 Exporter en CSV"):
-        st.session_state.enriched_df.to_csv("data/output/geocoded_results_google.csv", index=False)
-        st.success("📁 Fichier exporté dans data/output/geocoded_results_google.csv")
-
-if st.session_state.cleaned_df is not None:
-    if st.button("📤 Exporter les adresses nettoyées"):
-        st.session_state.cleaned_df.to_csv("data/output/geocoded_results_cleaned.csv", index=False)
-        st.success("📁 Fichier exporté dans data/output/geocoded_results_cleaned.csv")
-
-
-
-git add .
-git commit -m "feat: implement fallback geocoding with HERE Maps when OpenStreetMap fails"
-git push origin main
+        df_export = st.session_state.last_selected_enriched_df
+        df_export.to_csv("data/output/geocoded_results_google.csv", index=False)
+        st.success(f"📁 {len(df_export)} lignes exportées dans data/output/geocoded_results_google.csv")
