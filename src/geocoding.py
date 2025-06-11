@@ -5,6 +5,42 @@ import streamlit as st
 from datetime import datetime
 from src.config import GOOGLE_API_KEY, OSM_EMAIL, HERE_API_KEY
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+def parallel_geocode_dataframe(df, address_column="full_address", max_workers=10):
+    from src.geocoding import geocode_row
+
+    mapped_fields = st.session_state.mapping_config.get("fields", {})
+
+    results = []
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                geocode_row,
+                row[address_column],
+                row.name,
+                row,
+                mapped_fields
+            ): index for index, row in df.iterrows()
+        }
+
+        for future in as_completed(futures):
+            try:
+                geocode_result = future.result()
+                index = geocode_result["row_index"]
+                original_row = df.loc[index].to_dict()
+                # Fusionner les deux dictionnaires (ligne d’origine + résultats géocodés)
+                merged = {**original_row, **geocode_result}
+                results.append(merged)
+            except Exception as e:
+                results.append({
+                    "status": "ERROR",
+                    "error_message": str(e),
+                    "row_index": futures[future]
+                })
+
+    return pd.DataFrame(results)
 
 def get_place_id_with_google(query):
     url = "https://maps.googleapis.com/maps/api/place/findplacefromtext/json"
@@ -115,22 +151,22 @@ def geocode_with_osm(address, email):
         "email": email
     }
     headers = {"User-Agent": "GeocoderBot/1.0"}
+
     try:
         response = requests.get(url, params=params, headers=headers, timeout=10)
         data = response.json()
         if len(data) > 0:
             result = data[0]
-            formatted = result.get("display_name", "")
-            osm_type = result.get("type", None)
-            precision = map_osm_precision(osm_type)
+            raw_type = result.get("type", None)
             return {
                 "latitude": result.get("lat"),
                 "longitude": result.get("lon"),
-                "formatted_address": formatted,
+                "formatted_address": result.get("display_name", ""),
                 "status": "OK",
                 "error_message": None,
                 "api_used": "osm",
-                "precision_level": precision,
+                "precision_level": map_osm_precision(raw_type),     # 🔁 standardisé
+                "precision_level_raw": raw_type,                   # 🧪 brut
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
         else:
@@ -142,6 +178,7 @@ def geocode_with_osm(address, email):
                 "error_message": "No results from OSM",
                 "api_used": "osm",
                 "precision_level": None,
+                "precision_level_raw": None,
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
     except Exception as e:
@@ -153,6 +190,7 @@ def geocode_with_osm(address, email):
             "error_message": str(e),
             "api_used": "osm",
             "precision_level": None,
+            "precision_level_raw": None,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
 
@@ -177,22 +215,24 @@ def geocode_with_here(address):
         "q": address,
         "apiKey": HERE_API_KEY,
     }
+
     try:
         response = requests.get(url, params=params, timeout=10)
         data = response.json()
         items = data.get("items", [])
+
         if items:
             result = items[0]
-            position = result["position"]
-            formatted = result.get("address", {}).get("label", "")
+            raw_type = result.get("resultType", None)
             return {
-                "latitude": position.get("lat"),
-                "longitude": position.get("lng"),
-                "formatted_address": formatted,
+                "latitude": result["position"].get("lat"),
+                "longitude": result["position"].get("lng"),
+                "formatted_address": result.get("address", {}).get("label", ""),
                 "status": "OK",
                 "error_message": None,
                 "api_used": "here",
-                "precision_level": result.get("resultType", None),
+                "precision_level": map_here_precision(raw_type),   # 🔁 standardisé
+                "precision_level_raw": raw_type,                  # 🧪 brut
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
         else:
@@ -204,6 +244,7 @@ def geocode_with_here(address):
                 "error_message": "No results from HERE Maps",
                 "api_used": "here",
                 "precision_level": None,
+                "precision_level_raw": None,
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
     except Exception as e:
@@ -215,6 +256,7 @@ def geocode_with_here(address):
             "error_message": str(e),
             "api_used": "here",
             "precision_level": None,
+            "precision_level_raw": None,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
 
@@ -373,3 +415,87 @@ def geocode_dataframe(df, address_column="full_address"):
     enriched_df = pd.concat([df.reset_index(drop=True), results_df.reset_index(drop=True)], axis=1)
     enriched_df = enriched_df.loc[:, ~enriched_df.columns.duplicated()]
     return enriched_df
+
+def geocode_row(address, index, row, mapped_fields):
+    from src.geocoding import (
+        clean_address,
+        get_place_id_with_google,
+        geocode_with_google,
+        geocode_with_osm,
+        geocode_with_here,
+        generate_address_without_name,
+        generate_reformatted_address,
+        is_better,
+        OSM_EMAIL
+    )
+
+    raw_address = address
+    address = clean_address(raw_address)
+
+    components_dict = {
+        "postal_code": row.get("postal_code"),
+        "city": row.get("city"),
+        "governorate": row.get("governorate")
+    }
+
+    best_result = None
+
+    # Étape 1 : place_id (name + city/country)
+    if "name" in row and pd.notna(row["name"]):
+        query = str(row["name"])
+        if "city" in row and pd.notna(row["city"]):
+            query += " " + str(row["city"])
+        elif "country" in row and pd.notna(row["country"]):
+            query += " " + str(row["country"])
+        place_id = get_place_id_with_google(query)
+        if place_id:
+            result = geocode_with_google(place_id=place_id)
+            if result and result["status"] == "OK":
+                best_result = result
+                if result.get("precision_level") == "ROOFTOP":
+                    best_result["row_index"] = index
+                    return best_result
+
+    # Étape 2 : sans name
+    address_no_name = generate_address_without_name(row, mapped_fields)
+    result = geocode_with_google(address=address_no_name, components_dict=components_dict)
+    if result and result["status"] == "OK":
+        if not best_result or is_better(result, best_result):
+            best_result = result
+            if result.get("precision_level") == "ROOFTOP":
+                best_result["row_index"] = index
+                return best_result
+
+    # Étape 3 : adresse reformattée
+    address_reformatted = generate_reformatted_address(row, mapped_fields)
+    result = geocode_with_google(address=address_reformatted, components_dict=components_dict)
+    if result and result["status"] == "OK":
+        if not best_result or is_better(result, best_result):
+            best_result = result
+            if result.get("precision_level") == "ROOFTOP":
+                best_result["row_index"] = index
+                return best_result
+
+    # Fallback vers OSM
+    if not best_result:
+        result = geocode_with_osm(address, email=OSM_EMAIL)
+        if result and result["status"] == "OK":
+            best_result = result
+            best_result["row_index"] = index
+            return best_result
+
+    # Fallback vers HERE
+    if not best_result:
+        result = geocode_with_here(address)
+        best_result = result  # OK ou pas, on le garde
+
+    if best_result:
+        best_result["row_index"] = index
+        return best_result
+    else:
+        return {
+            "row_index": index,
+            "status": "ERROR",
+            "error_message": "Aucune API n’a retourné de résultat.",
+            "api_used": "aucune"
+        }

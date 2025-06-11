@@ -3,7 +3,7 @@ import pandas as pd
 import math
 import re
 from src.ingestion import read_file
-from src.geocoding import geocode_dataframe, clean_address
+from src.geocoding import clean_address, parallel_geocode_dataframe
 
 # Configuration
 st.set_page_config(page_title="Robot de Géocodage", layout="wide")
@@ -179,9 +179,7 @@ if st.session_state.df is not None and "full_address" in st.session_state.df.col
 
             with st.spinner(f"🔄 Traitement du batch {i+1}/{nb_batches_to_run}..."):
                 renamed_df = batch_df.rename(columns={v: k for k, v in mapped_fields.items()})
-                enriched_batch = geocode_dataframe(renamed_df, address_column="full_address")
-
-                #enriched_batch = geocode_dataframe(batch_df, address_column="full_address")
+                enriched_batch = parallel_geocode_dataframe(renamed_df, address_column="full_address", max_workers=10)
                 batch_results.append(enriched_batch)
                 st.success(f"✅ Batch {i+1} traité !")
 
@@ -312,10 +310,8 @@ if st.session_state.enriched_df is not None:
                         failed_df.drop(columns=[col], inplace=True)
 
                 # Re-géocodage complet
-                #retried_df = geocode_dataframe(failed_df, address_column="full_address")
-
                 renamed_df = failed_df.rename(columns={v: k for k, v in mapped_fields.items()})
-                retried_df = geocode_dataframe(renamed_df, address_column="full_address")
+                retried_df = parallel_geocode_dataframe(renamed_df, address_column="full_address", max_workers=10)
 
                 # Affichage debug
                 st.markdown("### ✅ Résultat des lignes relancées")
