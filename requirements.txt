@@ -4,3 +4,4 @@ python-dotenv
 tqdm
 chardet
 streamlit
+weasyprint

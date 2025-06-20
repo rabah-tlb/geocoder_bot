@@ -6,6 +6,7 @@ from datetime import datetime
 from src.config import GOOGLE_API_KEY, OSM_EMAIL, HERE_API_KEY
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 
 def parallel_geocode_dataframe(df, address_column="full_address", max_workers=10):
     from src.geocoding import geocode_row
@@ -30,7 +31,6 @@ def parallel_geocode_dataframe(df, address_column="full_address", max_workers=10
                 geocode_result = future.result()
                 index = geocode_result["row_index"]
                 original_row = df.loc[index].to_dict()
-                # Fusionner les deux dictionnaires (ligne d’origine + résultats géocodés)
                 merged = {**original_row, **geocode_result}
                 results.append(merged)
             except Exception as e:
@@ -54,8 +54,6 @@ def get_place_id_with_google(query):
     try:
         response = requests.get(url, params=params, timeout=10)
         data = response.json()
-        print(f"🔍 {query}")
-        print(f"📥 Response: {data}")
         if data["status"] == "OK" and data.get("candidates"):
             return data["candidates"][0].get("place_id")
         else:
@@ -165,8 +163,8 @@ def geocode_with_osm(address, email):
                 "status": "OK",
                 "error_message": None,
                 "api_used": "osm",
-                "precision_level": map_osm_precision(raw_type),     # 🔁 standardisé
-                "precision_level_raw": raw_type,                   # 🧪 brut
+                "precision_level": map_osm_precision(raw_type),
+                "precision_level_raw": raw_type,                   
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
         else:
@@ -231,8 +229,8 @@ def geocode_with_here(address):
                 "status": "OK",
                 "error_message": None,
                 "api_used": "here",
-                "precision_level": map_here_precision(raw_type),   # 🔁 standardisé
-                "precision_level_raw": raw_type,                  # 🧪 brut
+                "precision_level": map_here_precision(raw_type),
+                "precision_level_raw": raw_type,                  
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
         else:
@@ -267,16 +265,25 @@ def clean_address(address):
         address += ", Tunisie"
     return address
 
-def generate_address_without_name(row, mapped_fields):
+def generate_address_without_name(row):
     parts = []
-    for field in ["street", "postal_code", "city", "governorate", "country"]:
-        if field in mapped_fields and mapped_fields[field] in row:
-            val = row[mapped_fields[field]]
-            if pd.notna(val):
-                parts.append(str(val))
-    return ", ".join(parts)
+    debug_parts = []
 
-def generate_reformatted_address(row, mapped_fields):
+    for field in ["street", "postal_code", "city", "governorate", "country"]:
+        if field in row:
+            val = row[field]
+            if pd.notna(val) and str(val).strip() != "":
+                parts.append(str(val).strip())
+                debug_parts.append(f"{field}='{val}'")
+            else:
+                debug_parts.append(f"{field}=❌ vide")
+        else:
+            debug_parts.append(f"{field}=❌ non présent dans row")
+
+    full_address = ", ".join(parts)
+    return full_address
+
+def generate_reformatted_address(row):
     def reformat_street(value):
         street = str(value)
         street = re.sub(r"^0{1,3}", "", street)
@@ -293,15 +300,16 @@ def generate_reformatted_address(row, mapped_fields):
         return street.strip()
 
     parts = []
-    if "street" in mapped_fields and mapped_fields["street"] in row:
-        val = row[mapped_fields["street"]]
-        if pd.notna(val):
-            parts.append(reformat_street(val))
+
+    # Street (reformatée)
+    if "street" in row and pd.notna(row["street"]):
+        parts.append(reformat_street(row["street"]))
+
+    # Autres champs standards
     for field in ["postal_code", "city", "governorate", "country"]:
-        if field in mapped_fields and mapped_fields[field] in row:
-            val = row[mapped_fields[field]]
-            if pd.notna(val):
-                parts.append(str(val))
+        if field in row and pd.notna(row[field]):
+            parts.append(str(row[field]))
+
     return ", ".join(parts)
 
 def is_better(result, previous):
@@ -366,7 +374,7 @@ def geocode_dataframe(df, address_column="full_address"):
                     continue
 
         # Étape 3 : adresse reformattée
-        address_reformatted = generate_reformatted_address(row, mapped_fields)
+        address_reformatted = generate_reformatted_address(row)
         result = geocode_with_google(address=address_reformatted, components_dict=components_dict)
         if result and result["status"] == "OK":
             if not best_result or is_better(result, best_result):
@@ -457,7 +465,7 @@ def geocode_row(address, index, row, mapped_fields):
                     return best_result
 
     # Étape 2 : sans name
-    address_no_name = generate_address_without_name(row, mapped_fields)
+    address_no_name = generate_address_without_name(row)
     result = geocode_with_google(address=address_no_name, components_dict=components_dict)
     if result and result["status"] == "OK":
         if not best_result or is_better(result, best_result):
@@ -467,7 +475,8 @@ def geocode_row(address, index, row, mapped_fields):
                 return best_result
 
     # Étape 3 : adresse reformattée
-    address_reformatted = generate_reformatted_address(row, mapped_fields)
+    address_reformatted = generate_reformatted_address(row)
+    print(f"[{index}] Reformatted address: '{address_reformatted}'")
     result = geocode_with_google(address=address_reformatted, components_dict=components_dict)
     if result and result["status"] == "OK":
         if not best_result or is_better(result, best_result):
@@ -499,3 +508,26 @@ def geocode_row(address, index, row, mapped_fields):
             "error_message": "Aucune API n’a retourné de résultat.",
             "api_used": "aucune"
         }
+
+def create_job_entry(job_id, total_rows):
+    return {
+        "job_id": job_id,
+        "start_time": datetime.now(),
+        "end_time": None,
+        "status": "in_progress",
+        "total_rows": total_rows,
+        "success": 0,
+        "failed": 0,
+        "precision_counts": {},
+        "details_df": None
+    }
+
+def finalize_job(job, enriched_df):
+    job["end_time"] = datetime.now()
+    job["status"] = "success"
+    job["success"] = (enriched_df["status"] == "OK").sum()
+    job["failed"] = len(enriched_df) - job["success"]
+    if "precision_level" in enriched_df.columns:
+        job["precision_counts"] = enriched_df["precision_level"].value_counts().to_dict()
+    job["details_df"] = enriched_df
+    return job
