@@ -1,5 +1,7 @@
 from weasyprint import HTML
 import pandas as pd
+import os
+from datetime import datetime
 
 def export_job_history_to_pdf(jobs, output_path="job_history.pdf"):
     # Préparer une liste de dictionnaires pour le tableau
@@ -55,8 +57,6 @@ def export_job_history_to_pdf(jobs, output_path="job_history.pdf"):
     HTML(string=html_content).write_pdf(output_path)
     return output_path
 
-
-
 def get_precision_stats(enriched_df):
     if "precision_level" not in enriched_df.columns:
         return []
@@ -74,3 +74,24 @@ def get_precision_stats(enriched_df):
             stats_lines.append(f"- `{level}` : {count}")
     
     return stats_lines
+
+def export_enriched_results(df, export_format="csv", sep=",", line_delimited_json=False):
+    now = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    filename = f"geocodage_result_{now}.{export_format}"
+    output_dir = "data/output"
+    os.makedirs(output_dir, exist_ok=True)
+    filepath = os.path.join(output_dir, filename)
+
+    if export_format == "csv":
+        df.to_csv(filepath, index=False, sep=sep)
+    elif export_format == "json":
+        if line_delimited_json:
+            df.to_json(filepath, orient="records", lines=True, force_ascii=False)
+        else:
+            df.to_json(filepath, orient="records", indent=2, force_ascii=False)
+    elif export_format == "txt":
+        df.to_csv(filepath, index=False, sep=sep)
+    else:
+        raise ValueError("Format d'export non supporté.")
+
+    return filepath

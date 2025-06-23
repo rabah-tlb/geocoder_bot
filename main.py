@@ -3,7 +3,7 @@ import pandas as pd
 import math
 import re
 from src.ingestion import read_file
-from src.utils import export_job_history_to_pdf
+from src.utils import export_job_history_to_pdf,export_enriched_results
 from src.geocoding import clean_address, parallel_geocode_dataframe, create_job_entry, finalize_job
 from datetime import datetime
 
@@ -196,6 +196,13 @@ if st.session_state.df is not None and "full_address" in st.session_state.df.col
 
         selected_enriched_df = pd.concat(batch_results, ignore_index=True)
         st.session_state.last_selected_enriched_df = selected_enriched_df
+        
+        # Alertes simples
+        if "OVER_QUERY_LIMIT" in selected_enriched_df["status"].values:
+            st.error("🚨 Quota Google dépassé !")
+
+        if selected_enriched_df["status"].value_counts().get("ERROR", 0) > 20:
+            st.warning("⚠️ Beaucoup d'erreurs détectées sur cette exécution.")
 
         job = finalize_job(job, selected_enriched_df)
         st.session_state.job_history.append(job)
@@ -351,11 +358,27 @@ if st.session_state.enriched_df is not None:
 
 # ========== EXPORT ==========
 if st.session_state.last_selected_enriched_df is not None:
-    if st.button("📅 Exporter en CSV"):
-        df_export = st.session_state.last_selected_enriched_df
-        df_export.to_csv("data/output/geocoded_results_google.csv", index=False)
-        st.success(f"📁 {len(df_export)} lignes exportées dans data/output/geocoded_results_google.csv")
+    export_format = st.selectbox("📤 Format d'export", ["csv", "json", "txt"])
+    sep = st.text_input("🔣 Séparateur (ex: ',' ou ';')", value=",")
 
+    if export_format == "json":
+        line_delimited = st.checkbox("🧱 JSON ligne par ligne", value=False)
+    else:
+        line_delimited = False
+
+    if st.button("📁 Exporter les résultats"):
+        df_export = st.session_state.last_selected_enriched_df
+        file_path = export_enriched_results(df_export, export_format=export_format, sep=sep, line_delimited_json=line_delimited)
+
+        with open(file_path, "rb") as file:
+            st.download_button(
+                label="📄 Télécharger le fichier exporté",
+                data=file,
+                file_name=file_path.split("/")[-1],
+                mime="text/plain" if export_format == "txt" else "application/json" if export_format == "json" else "text/csv"
+            )
+
+# ========== JOBS HISTORY ==========
 if st.session_state.job_history:
     st.subheader("📜 Historique des Jobs")
     df_jobs_history = pd.DataFrame([
@@ -392,3 +415,28 @@ if st.session_state.job_history:
             st.write(f"❌ Échecs : {job['failed']}")
             st.write(f"🎯 Précisions : {job['precision_counts']}")
             st.dataframe(job["details_df"].head())
+
+# ========== MONITORING ==========
+if st.session_state.job_history:
+    with st.expander("📈 Monitoring"):
+        total_jobs = len(st.session_state.job_history)
+        total_rows = sum(job["total_rows"] for job in st.session_state.job_history)
+        total_success = sum(job["success"] for job in st.session_state.job_history)
+        total_failed = sum(job["failed"] for job in st.session_state.job_history)
+        rate = round((total_success / total_rows) * 100, 2) if total_rows > 0 else 0
+        api_counts = {}
+
+        for job in st.session_state.job_history:
+            df = job["details_df"]
+            if "api_used" in df.columns:
+                for api in df["api_used"].unique():
+                    api_counts[api] = api_counts.get(api, 0) + (df["api_used"] == api).sum()
+
+        st.markdown(f"**🧠 Jobs traités :** `{total_jobs}`")
+        st.markdown(f"**📄 Total lignes :** `{total_rows}`")
+        st.markdown(f"✅ Succès : `{total_success}` – ❌ Échecs : `{total_failed}`")
+        st.markdown(f"🎯 **Taux de réussite global :** `{rate}%`")
+
+        st.markdown("🔌 **Répartition par API utilisée :**")
+        for api, count in api_counts.items():
+            st.markdown(f"- `{api}` : {count} lignes")

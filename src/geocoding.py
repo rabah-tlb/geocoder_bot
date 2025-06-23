@@ -7,6 +7,7 @@ from src.config import GOOGLE_API_KEY, OSM_EMAIL, HERE_API_KEY
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from src.logger import log_api_call
 
 def parallel_geocode_dataframe(df, address_column="full_address", max_workers=10):
     from src.geocoding import geocode_row
@@ -82,10 +83,13 @@ def geocode_with_google(address=None, components_dict=None, place_id=None):
                 components_parts.append(f"administrative_area_level_1:{components_dict['governorate']}")
         params["components"] = "|".join(components_parts)
         params["address"] = address
-
+    start_time = time.time()
     try:
         response = requests.get(url, params=params, timeout=10)
+        duration = time.time() - start_time
         data = response.json()
+        
+        log_api_call("google", response.url, data["status"], duration, response=data)
 
         if data["status"] == "OK":
             result = data["results"][0]
@@ -113,6 +117,8 @@ def geocode_with_google(address=None, components_dict=None, place_id=None):
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
     except Exception as e:
+        duration = time.time() - start_time
+        log_api_call("google", url, "ERROR", duration, error=str(e))
         return {
             "latitude": None,
             "longitude": None,
@@ -149,10 +155,15 @@ def geocode_with_osm(address, email):
         "email": email
     }
     headers = {"User-Agent": "GeocoderBot/1.0"}
+    start_time = time.time()
 
     try:
         response = requests.get(url, params=params, headers=headers, timeout=10)
+        duration = time.time() - start_time
         data = response.json()
+        
+        log_api_call("osm", response.url, data["status"], duration, response=data)
+
         if len(data) > 0:
             result = data[0]
             raw_type = result.get("type", None)
@@ -180,6 +191,8 @@ def geocode_with_osm(address, email):
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
     except Exception as e:
+        duration = time.time() - start_time
+        log_api_call("osm", url, "ERROR", duration, error=str(e))
         return {
             "latitude": None,
             "longitude": None,
@@ -213,11 +226,14 @@ def geocode_with_here(address):
         "q": address,
         "apiKey": HERE_API_KEY,
     }
+    start_time = time.time()
 
     try:
         response = requests.get(url, params=params, timeout=10)
+        duration = time.time() - start_time
         data = response.json()
         items = data.get("items", [])
+        log_api_call("here", response.url, "OK" if items else "ZERO_RESULTS", duration, response=data)
 
         if items:
             result = items[0]
@@ -246,6 +262,8 @@ def geocode_with_here(address):
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             }
     except Exception as e:
+        duration = time.time() - start_time
+        log_api_call("here", url, "ERROR", duration, error=str(e))
         return {
             "latitude": None,
             "longitude": None,
@@ -476,7 +494,6 @@ def geocode_row(address, index, row, mapped_fields):
 
     # Étape 3 : adresse reformattée
     address_reformatted = generate_reformatted_address(row)
-    print(f"[{index}] Reformatted address: '{address_reformatted}'")
     result = geocode_with_google(address=address_reformatted, components_dict=components_dict)
     if result and result["status"] == "OK":
         if not best_result or is_better(result, best_result):
