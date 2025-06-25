@@ -138,9 +138,9 @@ if st.session_state.df is not None and "full_address" in st.session_state.df.col
     st.markdown(f"🔢 Nombre total de lignes : **{total_rows}**")
 
     start_line = st.number_input("📍 Ligne de départ (incluse)", min_value=0, max_value=total_rows - 1, value=0)
-    end_line = st.number_input("🏁 Ligne de fin (exclue)", min_value=start_line + 1, max_value=total_rows, value=min(start_line + 100, total_rows))
+    end_line = st.number_input("🏁 Ligne de fin (exclue)", min_value=start_line + 1, max_value=total_rows, value=min(start_line + 1000, total_rows))
 
-    batch_size = st.number_input("📦 Taille d’un batch", min_value=10, max_value=1000, value=100, step=10)
+    batch_size = st.number_input("📦 Taille d’un batch", min_value=10, max_value=100000, value=1000, step=10)
 
     selected_df = st.session_state.df.iloc[start_line:end_line].copy()
     total_selected = len(selected_df)
@@ -163,6 +163,10 @@ if st.session_state.df is not None and "full_address" in st.session_state.df.col
     if st.button("🚀 Lancer le géocodage sur cette plage"):
         batch_results = []
         
+        st.session_state["dynamic_batches"] = [None] * nb_batches_to_run
+
+        tabs = st.tabs(["📊 Total", "❌ Échecs"] + [f"Batch {i+1}" for i in range(nb_batches_to_run)])
+        
         job_id = f"JOB_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         job = create_job_entry(job_id, total_rows=actual_rows)
         
@@ -171,6 +175,14 @@ if st.session_state.df is not None and "full_address" in st.session_state.df.col
             end = min((i + 1) * batch_size, total_selected)
             batch_df = selected_df.iloc[start:end].copy()
 
+            progress_bar = st.progress(0)
+            completed = [0] 
+            total = len(batch_df)
+
+            def update_progress():
+                completed[0] += 1
+                progress_bar.progress(completed[0] / total)
+                
             # Générer les components dynamiques pour chaque ligne
             components_list = []
             for _, row in batch_df.iterrows():
@@ -188,8 +200,37 @@ if st.session_state.df is not None and "full_address" in st.session_state.df.col
 
             with st.spinner(f"🔄 Traitement du batch {i+1}/{nb_batches_to_run}..."):
                 renamed_df = batch_df.rename(columns={v: k for k, v in mapped_fields.items()})
-                enriched_batch = parallel_geocode_row(renamed_df, address_column="full_address", max_workers=10)
+                enriched_batch = parallel_geocode_row(renamed_df, address_column="full_address", max_workers=20, progress_callback=update_progress)
                 batch_results.append(enriched_batch)
+                st.session_state["dynamic_batches"][i] = enriched_batch
+
+                # ✅ Affichage direct dans l’onglet correspondant
+                with tabs[i + 2]:
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        batch_success = (enriched_batch["status"] == "OK").sum()
+                        batch_failed = len(enriched_batch) - batch_success
+                        rate = round(batch_success / len(enriched_batch) * 100, 2)
+                        st.markdown(f"### 📦 Batch {i+1} – {len(enriched_batch)} lignes")
+                        st.markdown(f"- Succès : ✅ {batch_success}")
+                        st.markdown(f"- Échecs : ❌ {batch_failed}")
+                        st.markdown(f"- Taux de réussite : *{rate}%*")
+
+                    with col2:
+                        if "precision_level" in enriched_batch.columns:
+                            precision_order = ["ROOFTOP", "RANGE_INTERPOLATED", "GEOMETRIC_CENTER", "APPROXIMATE"]
+                            precision_counts = enriched_batch["precision_level"].value_counts().to_dict()
+
+                            st.markdown("#### 🎯 Niveaux de précision dans ce batch :")
+                            for level in precision_order:
+                                if level in precision_counts:
+                                    st.markdown(f"- {level} : {precision_counts[level]}")
+                            for level, count in precision_counts.items():
+                                if level not in precision_order:
+                                    st.markdown(f"- {level} : {count}")
+
+                    st.dataframe(enriched_batch)
                 st.success(f"✅ Batch {i+1} traité !")
 
         st.session_state.batch_results = batch_results

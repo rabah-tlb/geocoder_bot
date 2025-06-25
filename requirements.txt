@@ -4,4 +4,4 @@ python-dotenv
 tqdm
 chardet
 streamlit
-weasyprint
+fpdf2>=2.7.6

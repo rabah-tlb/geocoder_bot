@@ -1,60 +1,50 @@
-from weasyprint import HTML
 import pandas as pd
 import os
 from datetime import datetime
+from fpdf import FPDF
+class PDF(FPDF):
+    def header(self):
+        self.set_font("Arial", "B", 14)
+        self.cell(0, 10, "Historique des Jobs", ln=True, align="C")
+
+    def table(self, df):
+        self.set_font("Arial", "B", 10)
+        col_widths = [25, 35, 35, 15, 15, 15, 40, 20]
+        headers = list(df.columns)
+        for i, col in enumerate(headers):
+            self.cell(col_widths[i], 8, col, border=1, align="C")
+        self.ln()
+
+        self.set_font("Arial", "", 9)
+        for _, row in df.iterrows():
+            for i, col in enumerate(headers):
+                value = str(row[col])
+                self.cell(col_widths[i], 8, value[:40], border=1)
+            self.ln()
 
 def export_job_history_to_pdf(jobs, output_path="data/output/job_history.pdf"):
-    # Préparer une liste de dictionnaires pour le tableau
-    data = []
+    import pandas as pd
+
+    rows = []
     for job in jobs:
-        data.append({
+        rows.append({
             "ID Job": job["job_id"],
-            "Début": pd.to_datetime(job["start_time"]).strftime("%Y-%m-%d %H:%M:%S"),
-            "Fin": pd.to_datetime(job["end_time"]).strftime("%Y-%m-%d %H:%M:%S"),
+            "Début": job["start_time"].strftime("%Y-%m-%d %H:%M:%S"),
+            "Fin": job["end_time"].strftime("%Y-%m-%d %H:%M:%S"),
             "Total": job["total_rows"],
             "Succès": job["success"],
             "Échecs": job["failed"],
-            "Précisions": "<br>".join([f"{k}: {v}" for k, v in job["precision_counts"].items()]),
+            "Précisions": ", ".join([f"{k}: {v}" for k, v in job["precision_counts"].items()]),
             "Statut": job["status"]
         })
 
-    df = pd.DataFrame(data)
+    df = pd.DataFrame(rows)
 
-    html_content = f"""
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <style>
-            body {{ font-family: sans-serif }}
-            h1 {{ color: #2E86C1; }}
-            table {{
-                width: 120%;
-                margin-left:-60px;
-                border-collapse: collapse;
-                font-size: 10px;
-            }}
-            th, td {{
-                border: 1px solid #ccc;
-                padding: 5px;
-                text-align: center;
-                vertical-align: middle;
-            }}
-            th {{
-                background-color: #f2f2f2;
-            }}
-            td {{
-                line-height: 1em;
-            }}
-        </style>
-    </head>
-    <body>
-        <h1>Historique des Jobs</h1>
-        {df.to_html(index=False, escape=False)}
-    </body>
-    </html>
-    """
+    pdf = PDF()
+    pdf.add_page()
+    pdf.table(df)
+    pdf.output(output_path)
 
-    HTML(string=html_content).write_pdf(output_path)
     return output_path
 
 def get_precision_stats(enriched_df):
@@ -67,11 +57,11 @@ def get_precision_stats(enriched_df):
     stats_lines = []
     for level in precision_order:
         if level in precision_counts:
-            stats_lines.append(f"- `{level}` : {precision_counts[level]}")
+            stats_lines.append(f"- ⁠ {level} ⁠ : {precision_counts[level]}")
 
     for level, count in precision_counts.items():
         if level not in precision_order:
-            stats_lines.append(f"- `{level}` : {count}")
+            stats_lines.append(f"- ⁠ {level} ⁠ : {count}")
     
     return stats_lines
 

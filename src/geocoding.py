@@ -9,7 +9,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from src.logger import log_api_call
 
-def parallel_geocode_row_google_only(df, address_column="full_address", max_workers=20):
+def parallel_geocode_row_google_only(df, address_column="full_address", max_workers=20, progress_callback=None):
     from src.geocoding import geocode_row_google_only
 
     mapped_fields = st.session_state.mapping_config.get("fields", {})
@@ -40,6 +40,8 @@ def parallel_geocode_row_google_only(df, address_column="full_address", max_work
                     "error_message": str(e),
                     "row_index": futures[future]
                 })
+            if progress_callback:
+                progress_callback()
 
     result_df = pd.DataFrame(results)
 
@@ -53,7 +55,7 @@ def parallel_geocode_row_google_only(df, address_column="full_address", max_work
 
     return result_df
 
-def parallel_geocode_row(df, address_column="full_address", max_workers=20):
+def parallel_geocode_row(df, address_column="full_address", max_workers=20, progress_callback=None):
     from src.geocoding import geocode_row
 
     mapped_fields = st.session_state.mapping_config.get("fields", {})
@@ -84,6 +86,8 @@ def parallel_geocode_row(df, address_column="full_address", max_workers=20):
                     "error_message": str(e),
                     "row_index": futures[future]
                 })
+            if progress_callback:
+                progress_callback()
 
     result_df = pd.DataFrame(results)
 
