@@ -3,13 +3,57 @@ import pandas as pd
 import time
 import streamlit as st
 from datetime import datetime
-from src.config import GOOGLE_API_KEY, OSM_EMAIL, HERE_API_KEY
+from functools import lru_cache
+from src.config import GOOGLE_API_KEY, HERE_API_KEY
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
 from src.logger import log_api_call
 
-def parallel_geocode_dataframe(df, address_column="full_address", max_workers=10):
+def parallel_geocode_row_google_only(df, address_column="full_address", max_workers=20):
+    from src.geocoding import geocode_row_google_only
+
+    mapped_fields = st.session_state.mapping_config.get("fields", {})
+
+    results = []
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                geocode_row_google_only,
+                row[address_column],
+                row.name,
+                row,
+                mapped_fields
+            ): index for index, row in df.iterrows()
+        }
+
+        for future in as_completed(futures):
+            try:
+                geocode_result = future.result()
+                index = geocode_result["row_index"]
+                original_row = df.loc[index].to_dict()
+                merged = {**original_row, **geocode_result}
+                results.append(merged)
+            except Exception as e:
+                results.append({
+                    "status": "ERROR",
+                    "error_message": str(e),
+                    "row_index": futures[future]
+                })
+
+    result_df = pd.DataFrame(results)
+
+    # Placer address_reformatted juste après full_address
+    if "full_address" in result_df.columns and "address_reformatted" in result_df.columns:
+        cols = list(result_df.columns)
+        cols.remove("address_reformatted")
+        fa_index = cols.index("full_address")
+        cols.insert(fa_index + 1, "address_reformatted")
+        result_df = result_df[cols]
+
+    return result_df
+
+def parallel_geocode_row(df, address_column="full_address", max_workers=20):
     from src.geocoding import geocode_row
 
     mapped_fields = st.session_state.mapping_config.get("fields", {})
@@ -41,7 +85,29 @@ def parallel_geocode_dataframe(df, address_column="full_address", max_workers=10
                     "row_index": futures[future]
                 })
 
-    return pd.DataFrame(results)
+    result_df = pd.DataFrame(results)
+
+    if "full_address" in result_df.columns and "address_reformatted" in result_df.columns:
+        cols = list(result_df.columns)
+        cols.remove("address_reformatted")
+        fa_index = cols.index("full_address")
+        cols.insert(fa_index + 1, "address_reformatted")
+        result_df = result_df[cols]
+
+    return result_df
+
+@lru_cache(maxsize=None)
+def geocode_with_here_cached(address):
+    return geocode_with_here(address)
+
+@lru_cache(maxsize=None)
+def geocode_with_google_cached(address, postal_code=None, city=None, governorate=None, place_id=None):
+    components_dict = {
+        "postal_code": postal_code,
+        "city": city,
+        "governorate": governorate
+    }
+    return geocode_with_google(address=address, components_dict=components_dict, place_id=place_id)
 
 def get_place_id_with_google(query):
     url = "https://maps.googleapis.com/maps/api/place/findplacefromtext/json"
@@ -88,7 +154,7 @@ def geocode_with_google(address=None, components_dict=None, place_id=None):
         response = requests.get(url, params=params, timeout=10)
         duration = time.time() - start_time
         data = response.json()
-        
+
         log_api_call("google", response.url, data["status"], duration, response=data)
 
         if data["status"] == "OK":
@@ -130,81 +196,6 @@ def geocode_with_google(address=None, components_dict=None, place_id=None):
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
 
-def map_osm_precision(osm_type: str) -> str:
-    if osm_type is None:
-        return "UNKNOWN"
-    osm_type = osm_type.lower()
-    if osm_type in ["building", "house"]:
-        return "ROOFTOP"
-    elif osm_type in ["residential", "street", "road"]:
-        return "RANGE_INTERPOLATED"
-    elif osm_type in ["postcode"]:
-        return "GEOMETRIC_CENTER"
-    elif osm_type in ["village", "suburb", "city", "county", "region", "country"]:
-        return "APPROXIMATE"
-    else:
-        return "UNKNOWN"
-
-def geocode_with_osm(address, email):
-    url = "https://nominatim.openstreetmap.org/search"
-    params = {
-        "q": address,
-        "format": "json",
-        "addressdetails": 1,
-        "limit": 1,
-        "email": email
-    }
-    headers = {"User-Agent": "GeocoderBot/1.0"}
-    start_time = time.time()
-
-    try:
-        response = requests.get(url, params=params, headers=headers, timeout=10)
-        duration = time.time() - start_time
-        data = response.json()
-        
-        log_api_call("osm", response.url, data["status"], duration, response=data)
-
-        if len(data) > 0:
-            result = data[0]
-            raw_type = result.get("type", None)
-            return {
-                "latitude": result.get("lat"),
-                "longitude": result.get("lon"),
-                "formatted_address": result.get("display_name", ""),
-                "status": "OK",
-                "error_message": None,
-                "api_used": "osm",
-                "precision_level": map_osm_precision(raw_type),
-                "precision_level_raw": raw_type,                   
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            }
-        else:
-            return {
-                "latitude": None,
-                "longitude": None,
-                "formatted_address": None,
-                "status": "ZERO_RESULTS",
-                "error_message": "No results from OSM",
-                "api_used": "osm",
-                "precision_level": None,
-                "precision_level_raw": None,
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            }
-    except Exception as e:
-        duration = time.time() - start_time
-        log_api_call("osm", url, "ERROR", duration, error=str(e))
-        return {
-            "latitude": None,
-            "longitude": None,
-            "formatted_address": None,
-            "status": "ERROR",
-            "error_message": str(e),
-            "api_used": "osm",
-            "precision_level": None,
-            "precision_level_raw": None,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        }
-
 def map_here_precision(match_level: str) -> str:
     if match_level is None:
         return "UNKNOWN"
@@ -215,7 +206,7 @@ def map_here_precision(match_level: str) -> str:
         return "RANGE_INTERPOLATED"
     elif match_level == "postalcode":
         return "GEOMETRIC_CENTER"
-    elif match_level in ["city", "locality", "district", "county", "state", "place", "country"]:
+    elif match_level in ["city", "locality", "district", "county", "state", "place", "country", "administrativeArea"]:
         return "APPROXIMATE"
     else:
         return "UNKNOWN"
@@ -225,7 +216,9 @@ def geocode_with_here(address):
     params = {
         "q": address,
         "apiKey": HERE_API_KEY,
+        "in": "countryCode:TUN"
     }
+
     start_time = time.time()
 
     try:
@@ -285,27 +278,18 @@ def clean_address(address):
 
 def generate_address_without_name(row):
     parts = []
-    debug_parts = []
-
     for field in ["street", "postal_code", "city", "governorate", "country"]:
         if field in row:
             val = row[field]
             if pd.notna(val) and str(val).strip() != "":
                 parts.append(str(val).strip())
-                debug_parts.append(f"{field}='{val}'")
-            else:
-                debug_parts.append(f"{field}=❌ vide")
-        else:
-            debug_parts.append(f"{field}=❌ non présent dans row")
-
-    full_address = ", ".join(parts)
-    return full_address
+    return ", ".join(parts)
 
 def generate_reformatted_address(row):
     def reformat_street(value):
         street = str(value)
         street = re.sub(r"^0{1,3}", "", street)
-        street = re.sub(r"\b0\s+(\d+)", r"\1", street)
+        street = re.sub(r"0\s+(\d+)", r"\1", street)
         street = re.sub(r"\b(IMM?|ILL)\b", "Immeuble", street, flags=re.IGNORECASE)
         street = re.sub(r"\b(RES|RS)\b", "Résidence", street, flags=re.IGNORECASE)
         match = re.match(r"^(\d{1,4})(\s*)(.*)", street)
@@ -318,16 +302,8 @@ def generate_reformatted_address(row):
         return street.strip()
 
     parts = []
-
-    # Street (reformatée)
     if "street" in row and pd.notna(row["street"]):
         parts.append(reformat_street(row["street"]))
-
-    # Autres champs standards
-    for field in ["postal_code", "city", "governorate", "country"]:
-        if field in row and pd.notna(row[field]):
-            parts.append(str(row[field]))
-
     return ", ".join(parts)
 
 def is_better(result, previous):
@@ -339,124 +315,59 @@ def is_better(result, previous):
     except:
         return False
 
-def geocode_dataframe(df, address_column="full_address"):
-    results = []
-    total = len(df)
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    mapped_fields = st.session_state.mapping_config.get("fields", {})
+def geocode_row(address, index, row, mapped_fields):
+    from src.geocoding import (
+        clean_address,
+        geocode_with_google_cached,
+        geocode_with_here_cached,
+        generate_reformatted_address,
+        is_better
+    )
 
-    for idx, (index, row) in enumerate(df.iterrows()):
-        raw_address = row[address_column]
-        address = clean_address(raw_address)
+    address = clean_address(address)
+    address_reformatted = generate_reformatted_address(row)
 
-        components_dict = {
-            "postal_code": row.get("postal_code"),
-            "city": row.get("city"),
-            "governorate": row.get("governorate")
+    best_result = None
+
+    result = geocode_with_here_cached(address)
+    if result and result["status"] == "OK":
+        if result.get("precision_level") == "ROOFTOP":
+            result["row_index"] = index
+            return result
+        best_result = result
+
+    result = geocode_with_here_cached(address_reformatted)
+    if result and result["status"] == "OK":
+        result["address_reformatted"] = address_reformatted
+        if not best_result or is_better(result, best_result):
+            best_result = result
+
+    if best_result:
+        best_result["row_index"] = index
+        return best_result
+    elif result: 
+        result["row_index"] = index
+        return result
+    else:
+        return {
+            "row_index": index,
+            "status": "ERROR",
+            "error_message": "Aucune API n’a retourné de résultat.",
+            "api_used": "aucune"
         }
 
-        status_text.markdown(f"⏳ Ligne {idx+1}/{total} – Test avec Google Maps...")
-
-        result = None
-        best_result = None
-
-        # Étape 1 : place_id (name + city/country)
-        if "name" in row and pd.notna(row["name"]):
-            query = str(row["name"])
-            if "city" in row and pd.notna(row["city"]):
-                query += " " + str(row["city"])
-            elif "country" in row and pd.notna(row["country"]):
-                query += " " + str(row["country"])
-            place_id = get_place_id_with_google(query)
-            if place_id:
-                result = geocode_with_google(place_id=place_id)
-                if result and result["status"] == "OK":
-                    best_result = result
-                    if result.get("precision_level") == "ROOFTOP":
-                        best_result["row_index"] = index
-                        results.append(best_result)
-                        progress_bar.progress(min((idx + 1) / total, 1.0))
-                        continue
-
-        # Étape 2 : sans name
-        address_no_name = generate_address_without_name(row, mapped_fields)
-        result = geocode_with_google(address=address_no_name, components_dict=components_dict)
-        if result and result["status"] == "OK":
-            if not best_result or is_better(result, best_result):
-                best_result = result
-                if result.get("precision_level") == "ROOFTOP":
-                    best_result["row_index"] = index
-                    results.append(best_result)
-                    progress_bar.progress(min((idx + 1) / total, 1.0))
-                    continue
-
-        # Étape 3 : adresse reformattée
-        address_reformatted = generate_reformatted_address(row)
-        result = geocode_with_google(address=address_reformatted, components_dict=components_dict)
-        if result and result["status"] == "OK":
-            if not best_result or is_better(result, best_result):
-                best_result = result
-                if result.get("precision_level") == "ROOFTOP":
-                    best_result["row_index"] = index
-                    results.append(best_result)
-                    progress_bar.progress(min((idx + 1) / total, 1.0))
-                    continue
-
-        # Fallback vers OSM
-        if not best_result:
-            status_text.markdown("⚠️ Google KO – tentative avec OSM...")
-            result = geocode_with_osm(address, email=OSM_EMAIL)
-            if result and result["status"] == "OK":
-                best_result = result
-                best_result["row_index"] = index
-                results.append(best_result)
-                progress_bar.progress(min((idx + 1) / total, 1.0))
-                continue
-
-        # Fallback vers HERE
-        if not best_result:
-            status_text.markdown("⚠️ OSM KO – tentative avec HERE Maps...")
-            result = geocode_with_here(address)
-            best_result = result  # que le résultat soit OK ou non, on le garde
-
-        if best_result:
-            best_result["row_index"] = index
-            results.append(best_result)
-        else:
-            results.append({
-                "row_index": index,
-                "status": "ERROR",
-                "error_message": "Aucune API n’a retourné de résultat.",
-                "api_used": "aucune"
-            })
-
-        current_api = best_result.get("api_used", "inconnue") if best_result else "aucune"
-        status_text.markdown(f"✅ Ligne {idx+1}/{total} – API utilisée : `{current_api}`")
-
-        progress_bar.progress(min((idx + 1) / total, 1.0))
-        time.sleep(0.05)
-
-    results_df = pd.DataFrame(results)
-    enriched_df = pd.concat([df.reset_index(drop=True), results_df.reset_index(drop=True)], axis=1)
-    enriched_df = enriched_df.loc[:, ~enriched_df.columns.duplicated()]
-    return enriched_df
-
-def geocode_row(address, index, row, mapped_fields):
+def geocode_row_google_only(address, index, row, mapped_fields):
     from src.geocoding import (
         clean_address,
         get_place_id_with_google,
         geocode_with_google,
-        geocode_with_osm,
-        geocode_with_here,
         generate_address_without_name,
         generate_reformatted_address,
-        is_better,
-        OSM_EMAIL
+        is_better
     )
 
-    raw_address = address
-    address = clean_address(raw_address)
+    address = clean_address(address)
+    address_reformatted = generate_reformatted_address(row)
 
     components_dict = {
         "postal_code": row.get("postal_code"),
@@ -466,7 +377,7 @@ def geocode_row(address, index, row, mapped_fields):
 
     best_result = None
 
-    # Étape 1 : place_id (name + city/country)
+    # 1. Google via place_id (nom + ville)
     if "name" in row and pd.notna(row["name"]):
         query = str(row["name"])
         if "city" in row and pd.notna(row["city"]):
@@ -482,7 +393,7 @@ def geocode_row(address, index, row, mapped_fields):
                     best_result["row_index"] = index
                     return best_result
 
-    # Étape 2 : sans name
+    # 2. Adresse sans nom
     address_no_name = generate_address_without_name(row)
     result = geocode_with_google(address=address_no_name, components_dict=components_dict)
     if result and result["status"] == "OK":
@@ -492,38 +403,29 @@ def geocode_row(address, index, row, mapped_fields):
                 best_result["row_index"] = index
                 return best_result
 
-    # Étape 3 : adresse reformattée
-    address_reformatted = generate_reformatted_address(row)
+    # 3. Adresse reformatée
     result = geocode_with_google(address=address_reformatted, components_dict=components_dict)
     if result and result["status"] == "OK":
         if not best_result or is_better(result, best_result):
             best_result = result
+            best_result["address_reformatted"] = address_reformatted
             if result.get("precision_level") == "ROOFTOP":
                 best_result["row_index"] = index
                 return best_result
 
-    # Fallback vers OSM
-    if not best_result:
-        result = geocode_with_osm(address, email=OSM_EMAIL)
-        if result and result["status"] == "OK":
-            best_result = result
-            best_result["row_index"] = index
-            return best_result
-
-    # Fallback vers HERE
-    if not best_result:
-        result = geocode_with_here(address)
-        best_result = result  # OK ou pas, on le garde
-
+    # Retourner le meilleur si trouvé
     if best_result:
         best_result["row_index"] = index
         return best_result
+    elif result:
+        result["row_index"] = index
+        return result
     else:
         return {
             "row_index": index,
             "status": "ERROR",
-            "error_message": "Aucune API n’a retourné de résultat.",
-            "api_used": "aucune"
+            "error_message": "Aucune réponse de Google.",
+            "api_used": "google"
         }
 
 def create_job_entry(job_id, total_rows):

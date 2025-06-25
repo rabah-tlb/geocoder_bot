@@ -3,7 +3,7 @@ import pandas as pd
 import os
 from datetime import datetime
 
-def export_job_history_to_pdf(jobs, output_path="job_history.pdf"):
+def export_job_history_to_pdf(jobs, output_path="data/output/job_history.pdf"):
     # Préparer une liste de dictionnaires pour le tableau
     data = []
     for job in jobs:
@@ -25,17 +25,17 @@ def export_job_history_to_pdf(jobs, output_path="job_history.pdf"):
     <head>
         <meta charset="UTF-8">
         <style>
-            body {{ font-family: sans-serif; padding: 20px; }}
+            body {{ font-family: sans-serif }}
             h1 {{ color: #2E86C1; }}
             table {{
-                width: 100%;
+                width: 120%;
+                margin-left:-60px;
                 border-collapse: collapse;
-                margin-top: 20px;
-                font-size: 12px;
+                font-size: 10px;
             }}
             th, td {{
                 border: 1px solid #ccc;
-                padding: 6px;
+                padding: 5px;
                 text-align: center;
                 vertical-align: middle;
             }}
@@ -43,7 +43,7 @@ def export_job_history_to_pdf(jobs, output_path="job_history.pdf"):
                 background-color: #f2f2f2;
             }}
             td {{
-                line-height: 1.4em;
+                line-height: 1em;
             }}
         </style>
     </head>

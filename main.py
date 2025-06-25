@@ -4,7 +4,7 @@ import math
 import re
 from src.ingestion import read_file
 from src.utils import export_job_history_to_pdf,export_enriched_results
-from src.geocoding import clean_address, parallel_geocode_dataframe, create_job_entry, finalize_job
+from src.geocoding import clean_address, parallel_geocode_row, parallel_geocode_row_google_only, create_job_entry, finalize_job
 from datetime import datetime
 
 # Configuration
@@ -188,7 +188,7 @@ if st.session_state.df is not None and "full_address" in st.session_state.df.col
 
             with st.spinner(f"🔄 Traitement du batch {i+1}/{nb_batches_to_run}..."):
                 renamed_df = batch_df.rename(columns={v: k for k, v in mapped_fields.items()})
-                enriched_batch = parallel_geocode_dataframe(renamed_df, address_column="full_address", max_workers=10)
+                enriched_batch = parallel_geocode_row(renamed_df, address_column="full_address", max_workers=10)
                 batch_results.append(enriched_batch)
                 st.success(f"✅ Batch {i+1} traité !")
 
@@ -201,8 +201,8 @@ if st.session_state.df is not None and "full_address" in st.session_state.df.col
         if "OVER_QUERY_LIMIT" in selected_enriched_df["status"].values:
             st.error("🚨 Quota Google dépassé !")
 
-        if selected_enriched_df["status"].value_counts().get("ERROR", 0) > 20:
-            st.warning("⚠️ Beaucoup d'erreurs détectées sur cette exécution.")
+        # if selected_enriched_df["status"].value_counts().get("ERROR", 0) > 20:
+        #     st.warning("⚠️ Beaucoup d'erreurs détectées sur cette exécution.")
 
         job = finalize_job(job, selected_enriched_df)
         st.session_state.job_history.append(job)
@@ -300,7 +300,7 @@ if st.session_state.enriched_df is not None:
         st.warning(f"⚠️ {len(failed_df)} lignes ont échoué au géocodage.")
 
         if st.button("🔁 Relancer uniquement les erreurs"):
-            with st.spinner("🔄 Relance des lignes échouées (avec reformulation des adresses)..."):
+            with st.spinner("🔄 Relance des lignes échouées avec Google Maps..."):
 
                 # Récupérer le mapping sauvegardé
                 mapped_fields = st.session_state.get("mapping_config", {}).get("fields", {})
@@ -330,7 +330,7 @@ if st.session_state.enriched_df is not None:
 
                 # Re-géocodage complet
                 renamed_df = failed_df.rename(columns={v: k for k, v in mapped_fields.items()})
-                retried_df = parallel_geocode_dataframe(renamed_df, address_column="full_address", max_workers=10)
+                retried_df = parallel_geocode_row_google_only(renamed_df, address_column="full_address", max_workers=20)
 
                 # Affichage debug
                 st.markdown("### ✅ Résultat des lignes relancées")
@@ -378,7 +378,7 @@ if st.session_state.last_selected_enriched_df is not None:
                 mime="text/plain" if export_format == "txt" else "application/json" if export_format == "json" else "text/csv"
             )
 
-# ========== JOBS HISTORY ==========
+# ========== HISTORIQUE DES JOBS ==========
 if st.session_state.job_history:
     st.subheader("📜 Historique des Jobs")
     df_jobs_history = pd.DataFrame([
