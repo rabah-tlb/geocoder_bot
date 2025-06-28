@@ -9,7 +9,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from src.logger import log_api_call
 
-def parallel_geocode_row_google_only(df, address_column="full_address", max_workers=20, progress_callback=None):
+def parallel_geocode_row_google_only(df, address_column="full_address", max_workers=10, progress_callback=None):
     from src.geocoding import geocode_row_google_only
 
     mapped_fields = st.session_state.mapping_config.get("fields", {})
@@ -55,7 +55,7 @@ def parallel_geocode_row_google_only(df, address_column="full_address", max_work
 
     return result_df
 
-def parallel_geocode_row(df, address_column="full_address", max_workers=20, progress_callback=None):
+def parallel_geocode_row(df, address_column="full_address", max_workers=10, progress_callback=None):
     from src.geocoding import geocode_row
 
     mapped_fields = st.session_state.mapping_config.get("fields", {})
@@ -273,13 +273,6 @@ def geocode_with_here(address):
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
 
-def clean_address(address):
-    address = str(address)
-    address = address.replace("é", "e").replace("è", "e").replace("à", "a").strip()
-    if "Tunisie" not in address:
-        address += ", Tunisie"
-    return address
-
 def generate_address_without_name(row):
     parts = []
     for field in ["street", "postal_code", "city", "governorate", "country"]:
@@ -294,7 +287,7 @@ def generate_reformatted_address(row):
         street = str(value)
         street = re.sub(r"^0{1,3}", "", street)
         street = re.sub(r"0\s+(\d+)", r"\1", street)
-        street = re.sub(r"\b(IMM?|ILL)\b", "Immeuble", street, flags=re.IGNORECASE)
+        street = re.sub(r"\b(IMM?|ILL|IMMB)\b", "Immeuble", street, flags=re.IGNORECASE)
         street = re.sub(r"\b(RES|RS)\b", "Résidence", street, flags=re.IGNORECASE)
         match = re.match(r"^(\d{1,4})(\s*)(.*)", street)
         if match:
@@ -304,10 +297,10 @@ def generate_reformatted_address(row):
         if not re.search(r"\b(Rue|Avenue|Av|Boulevard|Blvd|Résidence|Immeuble)\b", street, flags=re.IGNORECASE):
             return "Rue " + street
         return street.strip()
-
     parts = []
     if "street" in row and pd.notna(row["street"]):
         parts.append(reformat_street(row["street"]))
+    print(parts)
     return ", ".join(parts)
 
 def is_better(result, previous):
@@ -321,30 +314,28 @@ def is_better(result, previous):
 
 def geocode_row(address, index, row, mapped_fields):
     from src.geocoding import (
-        clean_address,
         geocode_with_google_cached,
         geocode_with_here_cached,
         generate_reformatted_address,
         is_better
     )
 
-    address = clean_address(address)
     address_reformatted = generate_reformatted_address(row)
 
     best_result = None
 
-    result = geocode_with_here_cached(address)
+    result = geocode_with_here_cached(address_reformatted)
     if result and result["status"] == "OK":
         if result.get("precision_level") == "ROOFTOP":
             result["row_index"] = index
             return result
         best_result = result
 
-    result = geocode_with_here_cached(address_reformatted)
-    if result and result["status"] == "OK":
-        result["address_reformatted"] = address_reformatted
-        if not best_result or is_better(result, best_result):
-            best_result = result
+    # result = geocode_with_here_cached(address_reformatted)
+    # if result and result["status"] == "OK":
+    #     result["address_reformatted"] = address_reformatted
+    #     if not best_result or is_better(result, best_result):
+    #         best_result = result
 
     if best_result:
         best_result["row_index"] = index
@@ -362,7 +353,6 @@ def geocode_row(address, index, row, mapped_fields):
 
 def geocode_row_google_only(address, index, row, mapped_fields):
     from src.geocoding import (
-        clean_address,
         get_place_id_with_google,
         geocode_with_google,
         generate_address_without_name,
@@ -370,7 +360,6 @@ def geocode_row_google_only(address, index, row, mapped_fields):
         is_better
     )
 
-    address = clean_address(address)
     address_reformatted = generate_reformatted_address(row)
 
     components_dict = {

@@ -2,31 +2,72 @@ import pandas as pd
 import os
 from datetime import datetime
 from fpdf import FPDF
+
+from fpdf import FPDF
+import pandas as pd
+import os
+
 class PDF(FPDF):
     def header(self):
         self.set_font("Arial", "B", 14)
-        self.cell(0, 10, "Historique des Jobs", ln=True, align="C")
+        self.set_text_color(40, 40, 40)
+        self.set_x(10)
+        self.cell(0, 10, "Historique des Jobs de Géocodage", ln=True, align="L")
+        self.ln(5)
+        self.set_draw_color(180, 180, 180)
+        self.line(10, self.get_y(), 200, self.get_y())
+        self.ln(5)
+
+    def footer(self):
+        self.set_y(-15)
+        self.set_font("Arial", "I", 8)
+        self.set_text_color(100)
+        self.cell(0, 10, f"Page {self.page_no()}", align="C")
 
     def table(self, df):
-        self.set_font("Arial", "B", 10)
-        col_widths = [25, 35, 35, 15, 15, 15, 40, 20]
+        self.set_font("Arial", "B", 9)
         headers = list(df.columns)
+
+        # Largeurs des colonnes
+        col_widths = [40, 28, 28, 12, 12, 12, 45, 20]
+
+        # En-têtes
+        self.set_x(10)
         for i, col in enumerate(headers):
             self.cell(col_widths[i], 8, col, border=1, align="C")
         self.ln()
 
-        self.set_font("Arial", "", 9)
+        self.set_font("Arial", "", 8)
+
         for _, row in df.iterrows():
+            y_start = self.get_y()
+            x_start = 10
+
+            # Déterminer la hauteur maximale de la ligne
+            heights = []
             for i, col in enumerate(headers):
-                value = str(row[col])
-                self.cell(col_widths[i], 8, value[:40], border=1)
-            self.ln()
+                text = str(row[col])
+                lines = self.multi_cell(col_widths[i], 5, text, border=0, align="L", split_only=True)
+                heights.append(len(lines) * 5)
+            max_height = max(heights)
+
+            self.set_y(y_start)
+            self.set_x(x_start)
+
+            for i, col in enumerate(headers):
+                text = str(row[col])
+                x_current = self.get_x()
+                y_current = self.get_y()
+
+                self.multi_cell(col_widths[i], 5, text, border=1, align="L")
+                self.set_xy(x_current + col_widths[i], y_current)
+
+            self.set_y(y_start + max_height)
 
 def export_job_history_to_pdf(jobs, output_path="data/output/job_history.pdf"):
-    import pandas as pd
-
     rows = []
     for job in jobs:
+        precision_lines = "\n".join([f"{k}: {v}" for k, v in job["precision_counts"].items()])
         rows.append({
             "ID Job": job["job_id"],
             "Début": job["start_time"].strftime("%Y-%m-%d %H:%M:%S"),
@@ -34,11 +75,13 @@ def export_job_history_to_pdf(jobs, output_path="data/output/job_history.pdf"):
             "Total": job["total_rows"],
             "Succès": job["success"],
             "Échecs": job["failed"],
-            "Précisions": ", ".join([f"{k}: {v}" for k, v in job["precision_counts"].items()]),
+            "Précisions": precision_lines,
             "Statut": job["status"]
         })
 
     df = pd.DataFrame(rows)
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     pdf = PDF()
     pdf.add_page()
@@ -46,6 +89,7 @@ def export_job_history_to_pdf(jobs, output_path="data/output/job_history.pdf"):
     pdf.output(output_path)
 
     return output_path
+
 
 def get_precision_stats(enriched_df):
     if "precision_level" not in enriched_df.columns:
