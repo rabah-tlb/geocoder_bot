@@ -5,3 +5,4 @@ tqdm
 chardet
 streamlit
 fpdf2>=2.7.6
+streamlit-option-menu
