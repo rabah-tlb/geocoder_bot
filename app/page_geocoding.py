@@ -139,7 +139,7 @@ def run_geocoding_page():
                     batch_results.append(enriched_batch)
                     st.session_state["dynamic_batches"][i] = enriched_batch
 
-                    with tabs[i + 2]:
+                    with tabs[i]:
                         col1, col2 = st.columns(2)
 
                         with col1:
@@ -181,11 +181,15 @@ def run_geocoding_page():
                 st.session_state.enriched_df = st.session_state.df.copy()
 
             for _, row in selected_enriched_df.iterrows():
-                row_index = row.get("row_index", None)
-                if row_index is not None:
-                    for col in selected_enriched_df.columns:
-                        if col != "row_index":
-                            st.session_state.enriched_df.at[row_index, col] = row[col]
+            row_index = row.get("row_index", None)
+            if row_index is not None:
+                for col in selected_enriched_df.columns:
+                    if col != "row_index":
+                        if col not in st.session_state.enriched_df.columns:
+                            st.session_state.enriched_df[col] = None  # Ajouter la colonne si manquante
+                        if st.session_state.enriched_df[col].dtype != object:
+                            st.session_state.enriched_df[col] = st.session_state.enriched_df[col].astype("object")
+                        st.session_state.enriched_df.at[row_index, col] = row[col]
 
             st.success("🎉 Tous les batches de la plage sélectionnée ont été traités !")
 
@@ -300,7 +304,7 @@ def run_geocoding_page():
 
                     # Re-géocodage complet
                     renamed_df = failed_df.rename(columns={v: k for k, v in mapped_fields.items()})
-                    retried_df = parallel_geocode_row_google_only(renamed_df, address_column="full_address", max_workers=20)
+                    retried_df = parallel_geocode_row(renamed_df, address_column="full_address", max_workers=20)
 
                     # Affichage debug
                     st.markdown("### ✅ Résultat des lignes relancées")

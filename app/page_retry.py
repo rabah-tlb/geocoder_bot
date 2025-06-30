@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from src.geocoding import parallel_geocode_row
 from datetime import datetime
+from src.geocoding_retry import retry_geocode_row
 
 def run_retry_page():
     st.subheader("🔁 Relance de géocodage sur un fichier existant")
@@ -68,7 +69,7 @@ def run_retry_page():
             st.error("❌ La colonne 'full_address' est requise.")
             return
 
-        st.markdown("### 🚀 Relance en cours avec Google Maps...")
+        st.markdown("### 🚀 Relance en cours...")
 
         # Progress bar
         progress_bar = st.progress(0)
@@ -79,9 +80,10 @@ def run_retry_page():
             completed[0] += 1
             progress_bar.progress(completed[0] / total)
 
-        # Exécution du géocodage
         renamed_df = df_combined.rename(columns={v: k for k, v in st.session_state.mapping_config.get("fields", {}).items()})
-        retried_df = parallel_geocode_row(renamed_df, address_column="full_address", max_workers=10, progress_callback=update_progress)
+        retried_df = retry_geocode_row(renamed_df, address_column="full_address", max_workers=10, progress_callback=update_progress)
+
+        # retried_df = parallel_geocode_row(renamed_df, address_column="full_address", max_workers=10, progress_callback=update_progress)
         st.success("✅ Géocodage terminé")
 
         # Affichage des résultats

@@ -8,6 +8,7 @@ from src.config import GOOGLE_API_KEY, HERE_API_KEY
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from src.logger import log_api_call
+from src.apis.here import geocode_with_here
 
 def parallel_geocode_row_google_only(df, address_column="full_address", max_workers=10, progress_callback=None):
     from src.geocoding import geocode_row_google_only
@@ -200,79 +201,6 @@ def geocode_with_google(address=None, components_dict=None, place_id=None):
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
 
-def map_here_precision(match_level: str) -> str:
-    if match_level is None:
-        return "UNKNOWN"
-    match_level = match_level.lower()
-    if match_level == "housenumber":
-        return "ROOFTOP"
-    elif match_level in ["intersection", "street"]:
-        return "RANGE_INTERPOLATED"
-    elif match_level == "postalcode":
-        return "GEOMETRIC_CENTER"
-    elif match_level in ["city", "locality", "district", "county", "state", "place", "country", "administrativeArea"]:
-        return "APPROXIMATE"
-    else:
-        return "UNKNOWN"
-
-def geocode_with_here(address):
-    url = "https://geocode.search.hereapi.com/v1/geocode"
-    params = {
-        "q": address,
-        "apiKey": HERE_API_KEY,
-        "in": "countryCode:TUN"
-    }
-
-    start_time = time.time()
-
-    try:
-        response = requests.get(url, params=params, timeout=10)
-        duration = time.time() - start_time
-        data = response.json()
-        items = data.get("items", [])
-        log_api_call("here", response.url, "OK" if items else "ZERO_RESULTS", duration, response=data)
-
-        if items:
-            result = items[0]
-            raw_type = result.get("resultType", None)
-            return {
-                "latitude": result["position"].get("lat"),
-                "longitude": result["position"].get("lng"),
-                "formatted_address": result.get("address", {}).get("label", ""),
-                "status": "OK",
-                "error_message": None,
-                "api_used": "here",
-                "precision_level": map_here_precision(raw_type),
-                "precision_level_raw": raw_type,                  
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            }
-        else:
-            return {
-                "latitude": None,
-                "longitude": None,
-                "formatted_address": None,
-                "status": "ZERO_RESULTS",
-                "error_message": "No results from HERE Maps",
-                "api_used": "here",
-                "precision_level": None,
-                "precision_level_raw": None,
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            }
-    except Exception as e:
-        duration = time.time() - start_time
-        log_api_call("here", url, "ERROR", duration, error=str(e))
-        return {
-            "latitude": None,
-            "longitude": None,
-            "formatted_address": None,
-            "status": "ERROR",
-            "error_message": str(e),
-            "api_used": "here",
-            "precision_level": None,
-            "precision_level_raw": None,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        }
-
 def generate_address_without_name(row):
     parts = []
     for field in ["street", "postal_code", "city", "governorate", "country"]:
@@ -300,7 +228,6 @@ def generate_reformatted_address(row):
     parts = []
     if "street" in row and pd.notna(row["street"]):
         parts.append(reformat_street(row["street"]))
-    print(parts)
     return ", ".join(parts)
 
 def is_better(result, previous):
@@ -326,6 +253,7 @@ def geocode_row(address, index, row, mapped_fields):
 
     result = geocode_with_here_cached(address_reformatted)
     if result and result["status"] == "OK":
+        result["address_reformatted"] = address_reformatted
         if result.get("precision_level") == "ROOFTOP":
             result["row_index"] = index
             return result

@@ -19,7 +19,7 @@ def run_analytics_page():
             return
 
         st.success("✅ Fichier chargé avec succès.")
-        st.dataframe(df.head())
+        st.dataframe(df)
 
         st.subheader("📌 Statistiques Générales")
 
