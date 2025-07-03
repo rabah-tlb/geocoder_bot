@@ -181,15 +181,15 @@ def run_geocoding_page():
                 st.session_state.enriched_df = st.session_state.df.copy()
 
             for _, row in selected_enriched_df.iterrows():
-            row_index = row.get("row_index", None)
-            if row_index is not None:
-                for col in selected_enriched_df.columns:
-                    if col != "row_index":
-                        if col not in st.session_state.enriched_df.columns:
-                            st.session_state.enriched_df[col] = None  # Ajouter la colonne si manquante
-                        if st.session_state.enriched_df[col].dtype != object:
-                            st.session_state.enriched_df[col] = st.session_state.enriched_df[col].astype("object")
-                        st.session_state.enriched_df.at[row_index, col] = row[col]
+                row_index = row.get("row_index", None)
+                if row_index is not None:
+                    for col in selected_enriched_df.columns:
+                        if col != "row_index":
+                            if col not in st.session_state.enriched_df.columns:
+                                st.session_state.enriched_df[col] = None  # Ajouter la colonne si manquante
+                            if st.session_state.enriched_df[col].dtype != object:
+                                st.session_state.enriched_df[col] = st.session_state.enriched_df[col].astype("object")
+                            st.session_state.enriched_df.at[row_index, col] = row[col]
 
             st.success("🎉 Tous les batches de la plage sélectionnée ont été traités !")
 
