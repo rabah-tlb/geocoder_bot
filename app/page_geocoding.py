@@ -181,15 +181,15 @@ def run_geocoding_page():
                 st.session_state.enriched_df = st.session_state.df.copy()
 
             for _, row in selected_enriched_df.iterrows():
-            row_index = row.get("row_index", None)
-            if row_index is not None:
-                for col in selected_enriched_df.columns:
-                    if col != "row_index":
-                        if col not in st.session_state.enriched_df.columns:
-                            st.session_state.enriched_df[col] = None  # Ajouter la colonne si manquante
-                        if st.session_state.enriched_df[col].dtype != object:
-                            st.session_state.enriched_df[col] = st.session_state.enriched_df[col].astype("object")
-                        st.session_state.enriched_df.at[row_index, col] = row[col]
+                row_index = row.get("row_index", None)
+                if row_index is not None:
+                    for col in selected_enriched_df.columns:
+                        if col != "row_index":
+                            if col not in st.session_state.enriched_df.columns:
+                                st.session_state.enriched_df[col] = None  # Ajouter la colonne si manquante
+                            if st.session_state.enriched_df[col].dtype != object:
+                                st.session_state.enriched_df[col] = st.session_state.enriched_df[col].astype("object")
+                            st.session_state.enriched_df.at[row_index, col] = row[col]
 
             st.success("🎉 Tous les batches de la plage sélectionnée ont été traités !")
 
@@ -266,7 +266,7 @@ def run_geocoding_page():
                 st.dataframe(batch_df)
 
     # ========== RELANCE DES ÉCHECS ==========
-    if st.session_state.last_selected_enriched_df is not None:
+    if st.session_state.enriched_df is not None:
         enriched_df = st.session_state.last_selected_enriched_df
         failed_df = enriched_df[enriched_df["status"] != "OK"]
 
@@ -304,7 +304,7 @@ def run_geocoding_page():
 
                     # Re-géocodage complet
                     renamed_df = failed_df.rename(columns={v: k for k, v in mapped_fields.items()})
-                    retried_df = parallel_geocode_row(renamed_df, address_column="full_address", max_workers=20)
+                    retried_df = parallel_geocode_row(renamed_df, address_column="full_address", max_workers=10)
 
                     # Affichage debug
                     st.markdown("### ✅ Résultat des lignes relancées")

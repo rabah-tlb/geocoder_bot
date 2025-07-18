@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from src.geocoding import parallel_geocode_row
 from datetime import datetime
-from src.geocoding_retry import retry_geocode_row
+from src.geocoding import parallel_geocode_row
 
 def run_retry_page():
     st.subheader("🔁 Relance de géocodage sur un fichier existant")
@@ -13,7 +13,7 @@ def run_retry_page():
         st.session_state.last_selected_enriched_df = df
         st.session_state.enriched_df = df.copy()
         st.success("✅ Fichier chargé avec succès !")
-        st.dataframe(df.head())
+        st.dataframe(df)
     else:
         st.warning("📭 Aucun fichier de relance sélectionné.")
         return
@@ -59,7 +59,7 @@ def run_retry_page():
 
         # Nettoyage des anciennes colonnes
         geo_cols = [
-            'latitude', 'longitude', 'formatted_address',
+            'latitude', 'longitude', 'formatted_address', 'address_reformtted',
             'status', 'error_message', 'api_used',
             'precision_level', 'timestamp'
         ]
@@ -81,7 +81,7 @@ def run_retry_page():
             progress_bar.progress(completed[0] / total)
 
         renamed_df = df_combined.rename(columns={v: k for k, v in st.session_state.mapping_config.get("fields", {}).items()})
-        retried_df = retry_geocode_row(renamed_df, address_column="full_address", max_workers=10, progress_callback=update_progress)
+        retried_df = parallel_geocode_row(renamed_df, address_column="full_address", max_workers=10, progress_callback=update_progress)
 
         # retried_df = parallel_geocode_row(renamed_df, address_column="full_address", max_workers=10, progress_callback=update_progress)
         st.success("✅ Géocodage terminé")

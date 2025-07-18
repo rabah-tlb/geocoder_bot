@@ -2,8 +2,6 @@ import pandas as pd
 import os
 from datetime import datetime
 from fpdf import FPDF
-
-from fpdf import FPDF
 import pandas as pd
 import os
 

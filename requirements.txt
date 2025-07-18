@@ -1,5 +1,6 @@
 pandas
 requests
+matplotlib
 python-dotenv
 tqdm
 chardet
