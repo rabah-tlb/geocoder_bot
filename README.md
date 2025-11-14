@@ -2,7 +2,7 @@
 
 # 🗺️ Robot de Géocodage Multi-API
 
-Ce projet permet de géocoder automatiquement des adresses à partir de fichiers CSV/TXT via une application Streamlit. Il utilise plusieurs APIs (HERE et Google Maps) pour maximiser la précision.
+Ce projet permet de géocoder automatiquement des adresses à partir de fichiers CSV/TXT via une application Streamlit. Il utilise plusieurs APIs (HERE, Google Maps et OSM) pour maximiser la précision.
 
 ---
 
@@ -11,8 +11,8 @@ Ce projet permet de géocoder automatiquement des adresses à partir de fichiers
 ### 1. Cloner le dépôt
 
 ```bash
-    git clone https://github.com/ton-org/robot-geocodage.git
-    cd robot-geocodage
+    git clone https://server-rtit-consulting.com/rabah.taalbi/geocoder_bot.git
+    cd geocoder_bot
 
 2. Créer un environnement virtuel
 

@@ -4,7 +4,7 @@ from datetime import datetime
 from src.config import HERE_API_KEY
 from src.logger import log_api_call
 
-def map_here_precision(match_level: str) -> str:
+def determine_here_precision(match_level: str) -> str:
     if not match_level:
         return "UNKNOWN"
     match_level = match_level.lower()
@@ -50,7 +50,7 @@ def geocode_with_here(address: str) -> dict:
                 "status": "OK",
                 "error_message": None,
                 "api_used": "here",
-                "precision_level": map_here_precision(raw_type),
+                "precision_level": determine_here_precision(raw_type),
                 "precision_level_raw": raw_type,
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }

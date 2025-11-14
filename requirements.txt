@@ -1,6 +1,7 @@
 pandas
 requests
 matplotlib
+seaborn
 python-dotenv
 tqdm
 chardet
