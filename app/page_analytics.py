@@ -5,6 +5,10 @@ import seaborn as sns
 from datetime import datetime
 from io import BytesIO
 from matplotlib.backends.backend_pdf import PdfPages
+from custom_style import apply_custom_style  # Import du style
+
+# Appliquer le style
+apply_custom_style()
 
 # Configuration du style
 sns.set_style("whitegrid")

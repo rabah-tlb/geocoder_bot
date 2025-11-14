@@ -3,7 +3,6 @@ import os
 from datetime import datetime
 from fpdf import FPDF
 import pandas as pd
-import os
 
 class PDF(FPDF):
     def header(self):

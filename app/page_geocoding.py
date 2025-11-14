@@ -9,6 +9,10 @@ from src.geocoding import (
     create_job_entry,
     finalize_job
 )
+from custom_style import apply_custom_style  # Import du style
+
+# Appliquer le style
+apply_custom_style()
 
 
 def initialize_session_state():

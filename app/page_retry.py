@@ -2,7 +2,10 @@ import streamlit as st
 import pandas as pd
 from src.geocoding_retry import retry_geocode_row
 from datetime import datetime
+from custom_style import apply_custom_style  # Import du style
 
+# Appliquer le style
+apply_custom_style()
 
 def initialize_retry_state():
     """Initialise les variables de session pour la persistance."""

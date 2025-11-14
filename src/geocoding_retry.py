@@ -78,15 +78,6 @@ def generate_alternative_addresses(row):
         if addr_original not in [a[1] for a in addresses]:
             addresses.append(("original", addr_original))
     
-    # 4. Adresse simplifiée (ville + rue uniquement)
-    if "street" in row and "city" in row:
-        if pd.notna(row["street"]) and pd.notna(row["city"]):
-            addr_simple = f"{row['street']}, {row['city']}"
-            if "country" in row and pd.notna(row["country"]):
-                addr_simple += f", {row['country']}"
-            if addr_simple not in [a[1] for a in addresses]:
-                addresses.append(("simple", addr_simple))
-    
     return addresses
 
 

@@ -3,12 +3,37 @@ from streamlit_option_menu import option_menu
 from app.page_geocoding import run_geocoding_page
 from app.page_retry import run_retry_page
 from app.page_analytics import run_analytics_page
+import base64
+from custom_style import apply_custom_style  # Import du style
+
+# Appliquer le style
+apply_custom_style()
 
 # Configuration de la page principale
-st.set_page_config(page_title="Dashboard Géocodage", layout="wide")
+st.set_page_config(
+    page_title="GeocoderBot",
+    layout="wide", 
+    page_icon="assets/img/geocoderbot.png"
+)
 
 # Titre principal
-st.title("📍 Robot de Géocodage Multi-API")
+def load_image(path):
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode()
+
+img_base64 = load_image("assets/img/geocoderbot.png")
+
+PRIMARY_COLOR = "#485093"
+
+st.markdown(
+    f"""
+    <div style="display: flex; align-items: center;">
+        <img src="data:image/png;base64,{img_base64}" style="width:70px; margin-right:10px;">
+        <h1 style="color:#485093; margin: 0;">GeocoderBot</h1>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 
 def initialize_global_state():
@@ -143,3 +168,20 @@ elif selected == "Relance":
     run_retry_page()
 elif selected == "Analytiques":
     run_analytics_page()
+    
+    
+    
+    
+    
+
+
+
+
+
+
+
+
+
+
+
+
