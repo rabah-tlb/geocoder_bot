@@ -23,8 +23,6 @@ def load_image(path):
 
 img_base64 = load_image("assets/img/geocoderbot.png")
 
-PRIMARY_COLOR = "#485093"
-
 st.markdown(
     f"""
     <div style="display: flex; align-items: center;">
@@ -169,19 +167,3 @@ elif selected == "Relance":
 elif selected == "Analytiques":
     run_analytics_page()
     
-    
-    
-    
-    
-
-
-
-
-
-
-
-
-
-
-
-
